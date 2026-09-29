@@ -1,0 +1,26 @@
+[project]
+name = "customer-support-agent"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "prechy",email = "preciousrobinsonokafor@gmail.com"}
+]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+]
+
+# Terminal commands: `name = "module.path:function"`.
+# After `poetry install`, run with `poetry run <name>` (or just `<name>` inside `poetry shell`/activated env).
+[project.scripts]
+support-agent = "customer_support_agent.main:main"
+
+[tool.poetry]
+packages = [{ include = "customer_support_agent", from = "src" }]
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.13"
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
