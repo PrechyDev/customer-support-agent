@@ -147,15 +147,40 @@ After an escalation, the agent stops trying to solve *that* issue, but can still
 - **Idempotency:** one ticket per (conversation, category, reference). A repeat request, or a retry from Vapi, returns the existing ticket.
 - **Customer reference:** a short, speakable ID like `T-1042` (escalations: `E-1042`). Said once, with no timeline.
 - **Escalation contact:** name, email and preferred callback time. The agent reads the email back to confirm it.
-- **Callback:** recorded as a *request*. `call_booked = yes` only if a preferred time was captured. The agent says "a representative will follow up", never "you're booked for 3pm".
-- **Callback hours (assumption, to confirm with RelayPay):** **Monday to Friday, 08:00–18:00 UTC.**
-  - The agent asks for the caller's time zone if they haven't given it, converts their time to UTC, and reads it back to confirm ("that's Tuesday at 2pm UTC, is that right?").
-  - **Outside the window:** "Our specialists are available Monday to Friday, 8am to 6pm UTC." Then it offers the nearest time that works.
-  - **Stored:** both how the caller said it ("tomorrow at 3, Lagos time") and the UTC time.
-  - **`create_escalation` checks the window on the server** and returns a clear error for a time outside it, so the rule holds even if the agent converts wrongly.
-  - The agent is given the current UTC date and time, so it can work out "tomorrow".
-  - Public holidays aren't handled (known gap).
 - **Statuses:** open, in progress, closed.
+
+### Callbacks
+
+- **A callback is a request for a time window, not a booked appointment.** The support team works a **shared queue** ordered by requested window, so there's no double booking and no per-slot capacity (assumption: several specialists on shift). `call_booked = yes` only if a window was captured. The agent says "a specialist will aim to call you…" and never "you're booked".
+- **Support hours (assumption, to confirm with RelayPay):** Monday to Friday, 08:00–18:00 UTC, on a **flat calendar**: no public holidays.
+- **The agent only speaks the caller's local time. It never mentions UTC.**
+- **Where the caller is:** the agent asks "which city or time zone are you in?" and accepts either one.
+  - If the city isn't recognised (the tool rejects it), the agent asks for their time zone instead.
+  - A caller who is travelling gives the time zone they'll be in at callback time.
+- **Turning what they say into a window** (local time, then trimmed to support hours):
+
+| Caller says | Window |
+|---|---|
+| "Morning" / "afternoon" / "evening" | 09–12 / 12–17 / 17–20 |
+| An exact time ("3pm") | a 2-hour window from that time (15–17) |
+| "Any time" / no preference | no window, `call_booked = no`, the next available specialist |
+
+- **`create_escalation` does all the time maths on the server**, using Python's `zoneinfo`, which handles daylight saving. The model never converts time zones. The agent passes the time zone (e.g. `Africa/Lagos`) plus the local day and window.
+  - **Partly outside support hours:** the tool trims the window and returns it in local time. The agent reads it out: "a specialist will aim to call you tomorrow between 12 and 5pm, Lagos time."
+  - **Fully outside (evening, weekend, "tomorrow" is a Saturday):** the tool returns an error with the **available hours in the caller's local time**, e.g. "weekdays 9am–2pm New York time". The agent offers those and the caller picks again.
+  - **Unknown time zone or city:** a clear error, and the agent asks for the other one (city ↔ time zone).
+- The agent is given the current date and time, so it can work out "tomorrow".
+- **Stored on the escalation:** how the caller said it ("tomorrow afternoon, Lagos"), the time zone, `callback_start_utc`, `callback_end_utc`, `call_booked`.
+
+### New ticket and escalation notifications
+
+- **Now (no email service):** the support console **plays a short sound and shows a badge** when a new ticket or escalation arrives. Staff with the console open hear the ping and know there's new work.
+- **How:** the console checks a small endpoint every 30 seconds for items newer than the last one it has seen. That's much simpler than a live connection, and a 30-second delay is fine for callbacks.
+- **Edge cases:**
+  - **Browsers block sound until the page has been clicked.** The console shows an "Enable sound" button, and the badge works without it.
+  - **Refreshing the page:** the console remembers the last item it pinged for, so a refresh doesn't ping again for old items.
+  - **Nobody has the console open:** no one hears it. That's a known gap until email or chat notifications exist. The escalation stays open in the queue, so nothing is lost.
+- **Later (future improvements):** email or chat notifications, and callbacks booked as events on a shared calendar (e.g. Google Calendar).
 
 ---
 
@@ -237,7 +262,7 @@ Based on `mcp-tool-requirements.md`. Deviations from the spec are marked **Δ**.
 | `retrieval_logs` | query, chunk IDs, source titles, scores, conversation and turn |
 | `tool_calls` | tool name, purpose, input summary, result summary, status, error, timestamp |
 | `support_tickets` | ticket_id, category, priority, summary, customer_id, reference, status, timestamps |
-| `escalations` | escalation_id, ticket_id, user name, user email, category, reason, call_booked, preferred time, verified yes/no, status, timestamps |
+| `escalations` | escalation_id, ticket_id, user name, user email, category, reason, call_booked, preferred time as said, callback time zone, callback_start_utc, callback_end_utc, verified yes/no, status, timestamps |
 | `evaluations` | scenario, expected, actual, pass/fail, notes, run ID |
 
 **Timestamps are always real time**, including in logs.
@@ -272,4 +297,8 @@ The 9 test scenarios from `test-scenarios.md`, plus:
 - ~~DB access from Python~~ **Decided 29-09-2026:** direct Postgres with `psycopg` over Supabase's **session pooler** (`DATABASE_URL`, port 5432, IPv4). There's no service role key and no `supabase-py`. RLS stays on for every table, with no policies, so Supabase's public REST API can't read anything.
 - Model: decided by the latency test (Haiku 4.5 vs Sonnet 5).
 - Support console login method (at minimum, one shared login).
-- **Business question for RelayPay:** what are the real support hours? Do they differ by region, and which public holidays apply? (§6 currently assumes Mon–Fri 08:00–18:00 UTC.)
+- **Business questions for RelayPay** (§6 currently assumes these):
+  - What are the real support hours, and do they differ by region? (Assumed: Mon–Fri 08:00–18:00 UTC.)
+  - Which public holidays apply? (Assumed: a flat calendar with no holidays.)
+  - How many specialists are on shift, and how many callbacks can they handle per hour? (Assumed: a shared queue with no capacity limit.)
+  - How should staff be notified of new tickets and escalations: email, Slack or Teams, a calendar? (Now: a console sound.)

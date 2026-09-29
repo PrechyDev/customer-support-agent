@@ -101,6 +101,12 @@ Buttons, active states and highlights use colour **with restraint**. There is on
 4. **Escalations:** reason, category, name, email, preferred callback time, call-booked flag, verified yes/no, status. This is what staff use to reach out to the customer.
 5. **Customers:** a list of seed customers and the calls we've had with each one.
 
+**New-item notification:**
+- A short, soft chime (not an alarm) plus a count badge on "Escalations" / "Tickets" when a new item arrives.
+- An **"Enable sound"** button in the top bar, because browsers block audio until the page is clicked. Once it's on, it shows "Sound on".
+- The badge clears when staff open the list.
+- Never sound alone: the badge makes it visible for anyone with sound off.
+
 **Not in the first version** (see Future improvements in the reflections notes): staff roles, assigning escalations or tickets, KB editing and approval.
 
 **Status badges:** a text label plus a muted colour from §2. Never colour alone.

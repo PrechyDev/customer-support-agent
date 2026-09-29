@@ -51,13 +51,14 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [ ] `lookup_transaction` (status only, date rule, ID normalisation)
 - [ ] `lookup_payout` (by payout or transaction ID, status only)
 - [ ] `create_support_ticket` (idempotent, speakable ID)
-- [ ] `create_escalation` (idempotent, linked ticket, call_booked rule, callback window Mon–Fri 08:00–18:00 UTC checked on the server)
+- [ ] `create_escalation` (idempotent, linked ticket, call_booked rule, callback window: city or time zone → zoneinfo, trimmed to Mon–Fri 08:00–18:00 UTC, returned in local time)
 - [ ] `log_conversation_event`
 - [ ] Every tool writes to `tool_calls` and handles Supabase failures
-- [ ] Unit tests per tool (missing records, mismatches, duplicates, DB down)
+- [ ] Add `tzdata` (Windows and slim containers have no time zone database)
+- [ ] Unit tests per tool (missing records, mismatches, duplicates, DB down, callback windows: partly/fully outside hours, weekend, DST, unknown time zone)
 
 ## Phase 4: Agent
-- [ ] Full system prompt: response paths, verification flow, what can be said, escalation triggers, behaviour sections of the KB, callback hours + time zone confirmation, current UTC date/time
+- [ ] Full system prompt: response paths, verification flow, what can be said, escalation triggers, behaviour sections of the KB, callback hours in local time only (ask city or time zone, never mention UTC), current date/time
 - [ ] Verification state stored on the conversation record
 - [ ] Retrieval results written to `retrieval_logs`
 - [ ] Turns written to `conversation_turns` (answer type, confidence note, timings)
@@ -89,6 +90,7 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [ ] Recent conversations and their status
 - [ ] Escalation count and list, with the collected contact details
 - [ ] Customers and their calls
+- [ ] New ticket/escalation ping: poll every 30s, sound + badge, "Enable sound" button, no repeat pings after refresh
 
 ## Phase 9: Evaluations
 - [ ] Evaluation runner that writes to `evaluations`
