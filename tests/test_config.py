@@ -2,55 +2,48 @@ from pathlib import Path
 
 import pytest
 
-from customer_support_agent.config import ConfigError, load_settings
+from customer_support_agent.config import ConfigError, load_agent_settings, load_settings
 
-VALID_TOKEN = "x" * 32
-
-
-def env(**overrides):
-    base = {"MCP_AUTH_TOKEN": VALID_TOKEN}
-    base.update(overrides)
-    return {k: v for k, v in base.items() if v is not None}
+TOKEN = "x" * 32
+BASE = {"MCP_AUTH_TOKEN": TOKEN}
+AGENT = {**BASE, "ANTHROPIC_API_KEY": "sk-test"}
 
 
-def test_defaults_when_only_token_is_set():
-    settings = load_settings(env())
-    assert settings.kb_path == Path("data/relaypay-knowledge-base.md")
-    assert settings.retrieval_log_path == Path("logs/retrieval.jsonl")
-    assert settings.mcp_host == "127.0.0.1"
-    assert settings.mcp_port == 8001
-    assert settings.log_level == "INFO"
+def test_mcp_defaults():
+    s = load_settings(BASE)
+    assert (s.kb_path, s.mcp_host, s.mcp_port, s.log_level) == (
+        Path("data/relaypay-knowledge-base.md"), "127.0.0.1", 8001, "INFO")
 
 
-def test_values_are_read_from_env():
-    settings = load_settings(env(KB_PATH="other.md", MCP_PORT="9000", LOG_LEVEL="debug"))
-    assert settings.kb_path == Path("other.md")
-    assert settings.mcp_port == 9000
-    assert settings.log_level == "DEBUG"
-
-
-def test_missing_token_raises():
+def test_missing_or_short_token_raises_without_leaking_it():
     with pytest.raises(ConfigError, match="MCP_AUTH_TOKEN"):
-        load_settings(env(MCP_AUTH_TOKEN=None))
+        load_settings({})
+    with pytest.raises(ConfigError, match="at least 32") as exc:
+        load_settings({"MCP_AUTH_TOKEN": "secret-but-short"})
+    assert "secret-but-short" not in str(exc.value)
 
 
-def test_short_token_raises():
-    with pytest.raises(ConfigError, match="at least 32"):
-        load_settings(env(MCP_AUTH_TOKEN="short"))
-
-
-@pytest.mark.parametrize("port", ["abc", "0", "70000"])
-def test_invalid_port_raises(port):
+def test_invalid_port_and_log_level_raise():
     with pytest.raises(ConfigError, match="MCP_PORT"):
-        load_settings(env(MCP_PORT=port))
-
-
-def test_invalid_log_level_raises():
+        load_settings({**BASE, "MCP_PORT": "70000"})
     with pytest.raises(ConfigError, match="LOG_LEVEL"):
-        load_settings(env(LOG_LEVEL="LOUD"))
+        load_settings({**BASE, "LOG_LEVEL": "LOUD"})
 
 
-def test_error_message_never_contains_the_token():
-    with pytest.raises(ConfigError) as exc:
-        load_settings(env(MCP_AUTH_TOKEN="secret-but-too-short"))
-    assert "secret-but-too-short" not in str(exc.value)
+def test_agent_defaults_and_mcp_url():
+    s = load_agent_settings({**AGENT, "MCP_PORT": "9001"})
+    assert (s.model, s.max_turns, s.turn_timeout_seconds, s.session_idle_seconds, s.max_sessions) == (
+        "claude-haiku-4-5-20251001", 6, 30, 180, 10)
+    assert s.mcp_url == "http://127.0.0.1:9001/mcp"
+
+
+def test_agent_requires_key_and_valid_numbers():
+    with pytest.raises(ConfigError, match="ANTHROPIC_API_KEY"):
+        load_agent_settings(BASE)
+    with pytest.raises(ConfigError, match="AGENT_MAX_TURNS"):
+        load_agent_settings({**AGENT, "AGENT_MAX_TURNS": "0"})
+
+
+def test_repr_hides_secrets():
+    text = repr(load_settings(BASE)) + repr(load_agent_settings(AGENT))
+    assert TOKEN not in text and "sk-test" not in text

@@ -25,11 +25,12 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [x] Check whether the Agent SDK bundles the Claude Code CLI: **it doesn't on Windows** (`_bundled/` is empty)
 - [ ] Install the CLI locally: `npm install -g @anthropic-ai/claude-code` (and check the Linux image at deploy)
 - [x] `kb/`: load the KB, split it into 37 chunks, BM25 + stemmer index, with unit tests
-- [x] `mcp_server/`: Streamable HTTP on 127.0.0.1:8001, bearer token, `X-Conversation-Id` header, `search_knowledge_base`, retrievals logged to `logs/retrieval.jsonl`, 35 tests (incl. end-to-end over HTTP)
+- [x] `mcp_server/`: Streamable HTTP on 127.0.0.1:8001, bearer token, `X-Conversation-Id` header, `search_knowledge_base`, retrievals logged to `logs/retrieval.jsonl`, tests incl. end-to-end over HTTP
 - [ ] Generate `MCP_AUTH_TOKEN` and add it to `.env`
-- [ ] `agent/`: Agent SDK setup (model from env, MCP tools only, turn cap, short voice prompt with the 37 KB headings), one warm session per call
+- [x] `agent/`: prompt (37 headings, KB policy sections, date), locked-down SDK options, one session per call with per-call lock, 30 s turn timeout, fallback lines, idle cleanup (180 s), 10-call cap, tests with a fake client (suite trimmed to 50 lean tests)
 - [ ] `api/`: `POST /chat/completions`, auth header check, SSE streaming, per-turn timing log
 - [ ] Vapi assistant set up (see Setup checklist), with ngrok running
+- [ ] Vapi silence hooks: 60 s "are you still there" message, 120 s goodbye + endCall, reset on caller speech (save in `docs/vapi-assistant.json`)
 - [ ] Voice test: Haiku 4.5
 - [ ] Voice test: Sonnet 5
 - [ ] Results and model decision in `submission/LATENCY_RESULTS.md`, plus the model choice in the reflections notes

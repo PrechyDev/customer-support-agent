@@ -62,6 +62,16 @@ class KnowledgeBase:
     def chunk_count(self) -> int:
         return len(self._chunks)
 
+    @property
+    def chunks(self) -> tuple[KBChunk, ...]:
+        return self._chunks
+
+    def get(self, chunk_id: str) -> KBChunk:
+        for chunk in self._chunks:
+            if chunk.id == chunk_id:
+                return chunk
+        raise KnowledgeBaseError(f"Knowledge base has no chunk with id '{chunk_id}'")
+
     def search(self, query: str, top_k: int = DEFAULT_TOP_K) -> list[SearchResult]:
         """Best-matching chunks, highest score first. Empty list means nothing relevant."""
         if top_k < 1:

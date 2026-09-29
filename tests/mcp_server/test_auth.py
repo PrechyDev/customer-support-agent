@@ -8,37 +8,21 @@ from customer_support_agent.mcp_server.auth import BearerTokenMiddleware
 TOKEN = "t" * 32
 
 
-def make_client():
+def client():
     async def ok(request):
         return PlainTextResponse("ok")
 
-    app = Starlette(routes=[Route("/mcp", ok, methods=["GET", "POST"])])
-    return TestClient(BearerTokenMiddleware(app, token=TOKEN))
+    return TestClient(BearerTokenMiddleware(Starlette(routes=[Route("/mcp", ok, methods=["POST"])]), token=TOKEN))
 
 
-def test_request_without_token_is_rejected():
-    response = make_client().post("/mcp")
-    assert response.status_code == 401
-    assert response.json() == {"error": "unauthorized"}
+def test_correct_token_passes():
+    assert client().post("/mcp", headers={"Authorization": f"Bearer {TOKEN}"}).text == "ok"
 
 
-def test_request_with_wrong_token_is_rejected():
-    response = make_client().post("/mcp", headers={"Authorization": "Bearer " + "w" * 32})
-    assert response.status_code == 401
-
-
-def test_token_without_bearer_prefix_is_rejected():
-    response = make_client().post("/mcp", headers={"Authorization": TOKEN})
-    assert response.status_code == 401
-
-
-def test_request_with_correct_token_passes():
-    response = make_client().post("/mcp", headers={"Authorization": f"Bearer {TOKEN}"})
-    assert response.status_code == 200
-    assert response.text == "ok"
-
-
-def test_rejection_is_logged_without_the_token(caplog):
-    make_client().post("/mcp", headers={"Authorization": "Bearer leaked-value-123"})
+def test_missing_wrong_or_unprefixed_token_is_rejected_and_not_logged(caplog):
+    for headers in ({}, {"Authorization": "Bearer leaked-value-123"}, {"Authorization": TOKEN}):
+        response = client().post("/mcp", headers=headers)
+        assert response.status_code == 401
+        assert response.json() == {"error": "unauthorized"}
     assert "Rejected MCP request" in caplog.text
     assert "leaked-value-123" not in caplog.text

@@ -1,4 +1,4 @@
-"""End to end: run the real MCP app over HTTP and talk to it with the MCP client."""
+"""End to end: run the real MCP app over HTTP and talk to it with the official MCP client."""
 
 import asyncio
 import socket
@@ -17,6 +17,7 @@ from customer_support_agent.mcp_server.server import create_app
 
 KB_PATH = Path(__file__).parents[2] / "data" / "relaypay-knowledge-base.md"
 TOKEN = "i" * 32
+AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
 
 class MemoryLogStore:
@@ -27,72 +28,51 @@ class MemoryLogStore:
         self.records.append(record)
 
 
-def free_port() -> int:
+@pytest.fixture(scope="module")
+def server():
+    store = MemoryLogStore()
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-@pytest.fixture(scope="module")
-def running_server():
-    store = MemoryLogStore()
+        port = s.getsockname()[1]
     app = create_app(kb=KnowledgeBase.from_file(KB_PATH), log_store=store, token=TOKEN)
-    port = free_port()
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
-    thread = threading.Thread(target=server.run, daemon=True)
+    uv = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=uv.run, daemon=True)
     thread.start()
     deadline = time.time() + 10
-    while not server.started:
+    while not uv.started:
         if time.time() > deadline:
             raise RuntimeError("MCP test server did not start")
         time.sleep(0.05)
     yield f"http://127.0.0.1:{port}/mcp", store
-    server.should_exit = True
+    uv.should_exit = True
     thread.join(timeout=5)
 
 
-async def call(url, headers, tool=None, args=None):
+async def session(url, headers, work):
     async with httpx2.AsyncClient(headers=headers, timeout=10) as http:
         async with Client(streamable_http_client(url, http_client=http)) as client:
-            if tool is None:
-                return await client.list_tools()
-            return await client.call_tool(tool, args or {})
+            return await work(client)
 
 
-AUTH = {"Authorization": f"Bearer {TOKEN}"}
+def test_authorized_client_lists_and_calls_the_tool(server):
+    url, store = server
 
+    async def work(client):
+        tools = await client.list_tools()
+        result = await client.call_tool("search_knowledge_base", {"query": "fees international payments"})
+        return tools, result
 
-def test_tool_is_listed(running_server):
-    url, _ = running_server
-    tools = asyncio.run(call(url, AUTH))
+    tools, result = asyncio.run(session(url, {**AUTH, "X-Conversation-Id": "call-abc"}, work))
     assert [t.name for t in tools.tools] == ["search_knowledge_base"]
-
-
-def test_search_over_http_returns_chunks_and_logs_conversation_id(running_server):
-    url, store = running_server
-    headers = {**AUTH, "X-Conversation-Id": "call-abc"}
-    result = asyncio.run(call(url, headers, "search_knowledge_base", {"query": "fees international payments"}))
-
-    assert result.is_error is False
-    data = result.structured_content
-    assert data["found"] is True
-    assert data["results"][0]["chunk_id"] == "how-does-relaypay-charge-fees"
+    assert result.structured_content["results"][0]["chunk_id"] == "how-does-relaypay-charge-fees"
     assert store.records[-1].conversation_id == "call-abc"
 
-
-def test_missing_conversation_id_is_logged_as_unknown(running_server):
-    url, store = running_server
-    asyncio.run(call(url, AUTH, "search_knowledge_base", {"query": "exchange rates"}))
-    assert store.records[-1].conversation_id == "unknown"
+    asyncio.run(session(url, AUTH, lambda c: c.call_tool("search_knowledge_base", {"query": "exchange rates"})))
+    assert store.records[-1].conversation_id == "unknown"  # header missing
 
 
-def test_request_without_token_is_rejected(running_server):
-    url, _ = running_server
-    response = httpx2.post(url, json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
-    assert response.status_code == 401
-
-
-def test_client_with_wrong_token_cannot_connect(running_server):
-    url, _ = running_server
+def test_unauthorized_requests_are_refused(server):
+    url, _ = server
+    assert httpx2.post(url, json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).status_code == 401
     with pytest.raises(Exception):
-        asyncio.run(call(url, {"Authorization": "Bearer " + "w" * 32}))
+        asyncio.run(session(url, {"Authorization": "Bearer " + "w" * 32}, lambda c: c.list_tools()))

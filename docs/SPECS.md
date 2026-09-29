@@ -290,6 +290,9 @@ Based on `mcp-tool-requirements.md`. Deviations from the spec are marked **Δ**.
 |---|---|
 | Supabase down | Lookups and tickets fail gracefully: "I can't access that right now." The caller is pointed to dashboard support, and the error goes to the Cloud Run logs. KB answers still work, because search is in memory. |
 | Agent hits its turn limit (`AGENT_MAX_TURNS=6` per caller message; the SDK reports `error_max_turns`) | The call continues. The first time in a call, the caller hears "Sorry, I didn't manage to finish that. Could you say it another way?" The second time, the agent offers a specialist and escalates. Both are logged. |
+| Caller goes silent | **Set up in Vapi** (hooks on `customer.speech.timeout`, reset when the caller speaks). At 60 s: "I haven't heard from you in a minute. Would you like to continue, or shall I end the call?" At 120 s: "I'll end the call now. Thanks for contacting RelayPay." and then `endCall`. |
+| Agent session left open | The backend closes a call's session when the call ends (end-of-call report), or after **3 idle minutes** as a safety net. That's longer than Vapi's 2, so a late reply never hits a closed session. |
+| Too many calls at once (more than `AGENT_MAX_SESSIONS`, default 10) | "We're very busy right now. Please try again in a few minutes." |
 | Claude API error or timeout | The backend streams a fixed spoken fallback line. There is never silence. |
 | Logging fails | Never blocks or breaks the reply. Logs are written after the response, with errors caught. |
 | Call drops | The conversation is closed when Vapi's end-of-call report arrives, and marked `abandoned` if it never does. |

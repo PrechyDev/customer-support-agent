@@ -24,70 +24,45 @@ def kb():
     return KnowledgeBase.from_file(KB_PATH)
 
 
-def run(kb, query, store=None, conversation_id="call-1"):
-    return search_knowledge_base(query, kb=kb, log_store=store or FakeLogStore(), conversation_id=conversation_id)
+def run(kb, query, store=None):
+    return search_knowledge_base(query, kb=kb, log_store=store or FakeLogStore(), conversation_id="call-1")
 
 
-def test_returns_matching_chunks(kb):
-    result = run(kb, "fees international payments")
-    assert result["found"] is True
-    top = result["results"][0]
-    assert top["chunk_id"] == "how-does-relaypay-charge-fees"
-    assert top["title"] == "Frequently Asked Questions > How Does RelayPay Charge Fees?"
-    assert "fees" in top["text"].lower()
-    assert isinstance(top["score"], float)
+def test_returns_chunks_or_a_decline_note(kb):
+    found = run(kb, "fees international payments")
+    assert found["found"] is True
+    assert found["results"][0]["chunk_id"] == "how-does-relaypay-charge-fees"
+    assert set(found["results"][0]) == {"chunk_id", "title", "text", "score"}
+
+    missing = run(kb, "weather forecast pizza")
+    assert (missing["found"], missing["results"]) == (False, [])
+    assert "decline or escalate" in missing["note"].lower()
 
 
-def test_no_match_tells_agent_to_decline(kb):
-    result = run(kb, "weather forecast pizza")
-    assert result["found"] is False
-    assert result["results"] == []
-    assert "decline or escalate" in result["note"].lower()
+def test_bad_queries_are_rejected_without_crashing(kb):
+    for query in ("   ", "fees " * MAX_QUERY_LENGTH):
+        assert run(kb, query)["error"] == "invalid_query"
 
 
-@pytest.mark.parametrize("query", ["", "   "])
-def test_empty_query_is_rejected(kb, query):
-    result = run(kb, query)
-    assert result["found"] is False
-    assert result["error"] == "invalid_query"
-
-
-def test_too_long_query_is_rejected(kb):
-    result = run(kb, "fees " * MAX_QUERY_LENGTH)
-    assert result["error"] == "invalid_query"
-
-
-def test_every_search_is_logged(kb):
+def test_searches_are_logged_but_bad_queries_are_not(kb):
     store = FakeLogStore()
-    run(kb, "fees international payments", store=store, conversation_id="call-42")
-    run(kb, "weather forecast pizza", store=store, conversation_id="call-42")
-
-    assert len(store.records) == 2
-    first, no_match = store.records
-    assert first.conversation_id == "call-42"
-    assert first.query == "fees international payments"
-    assert first.chunk_ids[0] == "how-does-relaypay-charge-fees"
-    assert len(first.chunk_ids) == len(first.titles) == len(first.scores)
-    assert first.duration_ms >= 0
+    run(kb, "fees international payments", store)
+    run(kb, "weather forecast pizza", store)
+    run(kb, "", store)
+    first, no_match = store.records  # exactly two
+    assert (first.conversation_id, first.query) == ("call-1", "fees international payments")
+    assert len(first.chunk_ids) == len(first.titles) == len(first.scores) > 0
     assert no_match.chunk_ids == ()
 
 
-def test_invalid_query_is_not_logged_as_a_retrieval(kb):
-    store = FakeLogStore()
-    run(kb, "", store=store)
-    assert store.records == []
-
-
 def test_log_failure_still_returns_results(kb):
-    result = run(kb, "fees international payments", store=FakeLogStore(fail=True))
-    assert result["found"] is True
+    assert run(kb, "fees international payments", FakeLogStore(fail=True))["found"] is True
 
 
-def test_unexpected_search_error_returns_structured_error(kb):
+def test_search_crash_returns_structured_error():
     class BrokenKB:
         def search(self, query):
             raise RuntimeError("boom")
 
     result = search_knowledge_base("fees", kb=BrokenKB(), log_store=FakeLogStore(), conversation_id="c")
-    assert result == {"found": False, "results": [], "error": "internal_error",
-                      "note": "Knowledge search failed. Apologise and offer to escalate."}
+    assert (result["found"], result["error"]) == (False, "internal_error")

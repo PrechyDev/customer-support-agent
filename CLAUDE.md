@@ -29,6 +29,7 @@ Before doing anything else:
 - **No over-engineering.** Build what the specs need now.
 - **Standard practices** for software, data security and design.
 - **Cover what can go wrong:** missing or bad input, missing files, services down, empty results, duplicates. Test the failure paths, not just the happy path.
+- **Keep tests lean:** one test per behaviour that could break, not per input or phrase. Group related checks in one test. No near-duplicate variations, and no tests on exact wording (e.g. prompt text). Aim for a handful of tests per module.
 - **Logging, never `print`.** Use `logging.getLogger(__name__)` in each module. Never log secrets or full personal data.
 - **Explicit error handling:** raise clear, specific errors at module boundaries, and catch them where the caller can do something useful. Never swallow errors silently.
 
