@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from customer_support_agent.config import ConfigError, load_agent_settings, load_settings
+from customer_support_agent.config import ConfigError, load_agent_settings, load_backend_settings, load_settings
 
 TOKEN = "x" * 32
 BASE = {"MCP_AUTH_TOKEN": TOKEN}
@@ -42,6 +42,17 @@ def test_agent_requires_key_and_valid_numbers():
         load_agent_settings(BASE)
     with pytest.raises(ConfigError, match="AGENT_MAX_TURNS"):
         load_agent_settings({**AGENT, "AGENT_MAX_TURNS": "0"})
+
+
+def test_backend_settings_protect_the_mcp_server():
+    ok = {**AGENT, "VAPI_LLM_SECRET": "v" * 32}
+    s = load_backend_settings(ok)
+    assert (s.host, s.port) == ("127.0.0.1", 8000)
+    for bad, field in (({"VAPI_LLM_SECRET": "short"}, "VAPI_LLM_SECRET"),
+                       ({"MCP_HOST": "0.0.0.0"}, "MCP_HOST"),
+                       ({"PORT": "8001"}, "PORT")):
+        with pytest.raises(ConfigError, match=field):
+            load_backend_settings({**ok, **bad})
 
 
 def test_repr_hides_secrets():

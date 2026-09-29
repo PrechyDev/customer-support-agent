@@ -20,7 +20,7 @@ Last updated: 29-09-2026
 ## Phase 1: Voice + KB latency test (the real components, KB only)
 Goal: measure latency and accuracy by voice before building the rest.
 - [x] Add dependencies: `rank-bm25`, `snowballstemmer`, `pytest`, `mcp` (v2), `claude-agent-sdk`, `uvicorn`, `python-dotenv`
-- [ ] Add `fastapi` (with the backend piece)
+- [x] Add `fastapi`
 - [x] Copy the KB into the repo at `data/relaypay-knowledge-base.md` (the reference folder isn't deployed)
 - [x] Check whether the Agent SDK bundles the Claude Code CLI: **it doesn't on Windows** (`_bundled/` is empty)
 - [ ] Install the CLI locally: `npm install -g @anthropic-ai/claude-code` (and check the Linux image at deploy)
@@ -28,7 +28,7 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [x] `mcp_server/`: Streamable HTTP on 127.0.0.1:8001, bearer token, `X-Conversation-Id` header, `search_knowledge_base`, retrievals logged to `logs/retrieval.jsonl`, tests incl. end-to-end over HTTP
 - [ ] Generate `MCP_AUTH_TOKEN` and add it to `.env`
 - [x] `agent/`: prompt (37 headings, KB policy sections, date), locked-down SDK options, one session per call with per-call lock, 30 s turn timeout, fallback lines, idle cleanup (180 s), 10-call cap, tests with a fake client (suite trimmed to 50 lean tests)
-- [ ] `api/`: `POST /chat/completions`, auth header check, SSE streaming, per-turn timing log
+- [x] `api/`: `POST /chat/completions` (Vapi secret, OpenAI SSE streaming, non-stream fallback, barge-in interrupts the engine, per-turn latency log), `/health`, one start command `poetry run relaypay-backend` (MCP first, then public app)
 - [ ] Vapi assistant set up (see Setup checklist), with ngrok running
 - [ ] Vapi silence hooks: 60 s "are you still there" message, 120 s goodbye + endCall, reset on caller speech (save in `docs/vapi-assistant.json`)
 - [ ] Voice test: Haiku 4.5

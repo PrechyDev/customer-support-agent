@@ -51,6 +51,19 @@ def test_slow_turn_times_out_and_interrupts_the_engine():
     assert client.interrupted is True
 
 
+def test_cancelled_turn_interrupts_the_engine():
+    """Caller talks over the agent: Vapi drops the request, so we stop the engine instead of finishing."""
+    client = FakeClient([[delta("Fees depend "), delta("on the corridor.")]], hang=False)
+
+    async def scenario():
+        stream = AgentSession(client, "call-1", turn_timeout_seconds=5).ask("fees?")
+        await anext(stream)  # first piece spoken, then the caller interrupts
+        await stream.aclose()
+
+    asyncio.run(scenario())
+    assert client.interrupted is True
+
+
 def test_start_connects_and_close_never_raises():
     class BadDisconnect(FakeClient):
         async def disconnect(self):

@@ -12,7 +12,8 @@ dependencies = [
     "mcp (>=2.2.0,<3.0.0)",
     "claude-agent-sdk (>=0.2.161,<0.3.0)",
     "python-dotenv (>=1.2.3,<2.0.0)",
-    "uvicorn (>=0.54.0,<0.55.0)"
+    "uvicorn (>=0.54.0,<0.55.0)",
+    "fastapi (>=0.141.1,<0.142.0)"
 ]
 
 # Terminal commands: `name = "module.path:function"`.
@@ -20,6 +21,7 @@ dependencies = [
 [project.scripts]
 support-agent = "customer_support_agent.main:main"
 relaypay-mcp = "customer_support_agent.mcp_server.__main__:main"
+relaypay-backend = "customer_support_agent.api.__main__:main"
 
 [tool.poetry]
 packages = [{ include = "customer_support_agent", from = "src" }]

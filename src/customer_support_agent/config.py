@@ -33,14 +33,18 @@ class Settings:
         )
 
 
-def _port(value: str) -> int:
+def _port_named(value: str, name: str) -> int:
     try:
         port = int(value)
     except ValueError:
-        raise ConfigError(f"MCP_PORT must be a number, got '{value}'") from None
+        raise ConfigError(f"{name} must be a number, got '{value}'") from None
     if not 1 <= port <= 65535:
-        raise ConfigError(f"MCP_PORT must be between 1 and 65535, got {port}")
+        raise ConfigError(f"{name} must be between 1 and 65535, got {port}")
     return port
+
+
+def _port(value: str) -> int:
+    return _port_named(value, "MCP_PORT")
 
 
 def _mcp_token(env: Mapping[str, str]) -> str:
@@ -99,6 +103,42 @@ class AgentSettings:
             f"turn_timeout_seconds={self.turn_timeout_seconds}, session_idle_seconds={self.session_idle_seconds}, "
             f"max_sessions={self.max_sessions}, mcp_url={self.mcp_url}, anthropic_api_key=***, mcp_auth_token=***)"
         )
+
+
+_LOOPBACK = ("127.0.0.1", "localhost", "::1")
+
+
+@dataclass(frozen=True)
+class BackendSettings:
+    host: str  # public listener; 127.0.0.1 locally (ngrok connects locally), 0.0.0.0 on Cloud Run
+    port: int
+    vapi_llm_secret: str
+    log_level: str
+
+    def __repr__(self) -> str:
+        return f"BackendSettings(host={self.host}, port={self.port}, vapi_llm_secret=***, log_level={self.log_level})"
+
+
+def load_backend_settings(env: Mapping[str, str] | None = None) -> BackendSettings:
+    """Settings for the public app. Also enforces that the MCP server stays private."""
+    env = os.environ if env is None else env
+
+    secret = env.get("VAPI_LLM_SECRET", "")
+    if len(secret) < MIN_TOKEN_LENGTH:
+        raise ConfigError(f"VAPI_LLM_SECRET must be set and at least {MIN_TOKEN_LENGTH} characters")
+    mcp_host = env.get("MCP_HOST", "127.0.0.1")
+    if mcp_host not in _LOOPBACK:
+        raise ConfigError(f"MCP_HOST must be a localhost address so the MCP server is never public, got '{mcp_host}'")
+    port = _port_named(env.get("PORT", "8000"), "PORT")
+    if port == _port(env.get("MCP_PORT", "8001")):
+        raise ConfigError("PORT and MCP_PORT must be different")
+
+    return BackendSettings(
+        host=env.get("HOST", "127.0.0.1"),
+        port=port,
+        vapi_llm_secret=secret,
+        log_level=load_settings(env).log_level,
+    )
 
 
 def load_agent_settings(env: Mapping[str, str] | None = None) -> AgentSettings:

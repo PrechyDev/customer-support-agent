@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import aclosing
 from dataclasses import dataclass, field, replace
 
 from customer_support_agent.agent import fallbacks
@@ -65,15 +66,18 @@ class SessionManager:
 
             entry.last_used = self._clock()
             spoke = False
-            async for event in entry.session.ask(message):
-                if isinstance(event, TextDelta):
-                    spoke = True
-                    yield event
-                    continue
-                line = self._fallback_for(entry, event)
-                if line:
-                    yield TextDelta((" " if spoke else "") + line)
-                yield replace(event, fallback=line)
+            # aclosing: if our reader stops early (barge-in), the session's stream is closed too,
+            # which interrupts the engine.
+            async with aclosing(entry.session.ask(message)) as turn:
+                async for event in turn:
+                    if isinstance(event, TextDelta):
+                        spoke = True
+                        yield event
+                        continue
+                    line = self._fallback_for(entry, event)
+                    if line:
+                        yield TextDelta((" " if spoke else "") + line)
+                    yield replace(event, fallback=line)
             entry.last_used = self._clock()
 
     @staticmethod

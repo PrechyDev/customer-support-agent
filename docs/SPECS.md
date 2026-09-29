@@ -293,6 +293,7 @@ Based on `mcp-tool-requirements.md`. Deviations from the spec are marked **Δ**.
 | Caller goes silent | **Set up in Vapi** (hooks on `customer.speech.timeout`, reset when the caller speaks). At 60 s: "I haven't heard from you in a minute. Would you like to continue, or shall I end the call?" At 120 s: "I'll end the call now. Thanks for contacting RelayPay." and then `endCall`. |
 | Agent session left open | The backend closes a call's session when the call ends (end-of-call report), or after **3 idle minutes** as a safety net. That's longer than Vapi's 2, so a late reply never hits a closed session. |
 | Too many calls at once (more than `AGENT_MAX_SESSIONS`, default 10) | "We're very busy right now. Please try again in a few minutes." |
+| Caller talks over the agent (barge-in): Vapi drops the request mid-reply | The agent interrupts the engine straight away, so the caller's next message doesn't wait for a reply nobody will hear. Logged as a cancelled turn. |
 | Claude API error or timeout | The backend streams a fixed spoken fallback line. There is never silence. |
 | Logging fails | Never blocks or breaks the reply. Logs are written after the response, with errors caught. |
 | Call drops | The conversation is closed when Vapi's end-of-call report arrives, and marked `abandoned` if it never does. |

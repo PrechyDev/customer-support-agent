@@ -125,12 +125,14 @@ class AgentSession:
         deadline = asyncio.get_running_loop().time() + self._timeout
         outcome: Outcome = "ok"
         error: str | None = None
+        engine_running = True  # until the engine reports it's done, or we've stopped it
 
         try:
             while True:
                 remaining = deadline - asyncio.get_running_loop().time()
                 item = await asyncio.wait_for(queue.get(), timeout=max(remaining, 0))
                 if item is _DONE:
+                    engine_running = False
                     break
                 if isinstance(item, BaseException):
                     raise item
@@ -139,11 +141,16 @@ class AgentSession:
             outcome, error = self._outcome(turn.result)
         except TimeoutError:
             outcome, error = "timeout", f"no reply within {self._timeout} s"
-            await self._interrupt()
         except Exception as exc:
             outcome, error = "error", f"{type(exc).__name__}: {exc}"
             logger.exception("Agent turn failed (conversation=%s)", self.conversation_id)
         finally:
+            # Also runs when the reader stops early: the caller talked over the agent and Vapi
+            # dropped the request. Stop the engine so the next message doesn't wait for a reply nobody hears.
+            if engine_running:
+                if outcome == "ok":
+                    logger.info("Agent turn cancelled mid-reply (conversation=%s)", self.conversation_id)
+                await self._interrupt()
             if not pump.done():
                 pump.cancel()
 
