@@ -31,4 +31,8 @@ def test_agent_uses_our_prompt_model_and_mcp_server(tmp_path):
         "headers": {"Authorization": f"Bearer {TOKEN}", "X-Conversation-Id": "call-7"},
     }}
     assert o.include_partial_messages is True and o.thinking == {"type": "disabled"}
-    assert o.env == {"ANTHROPIC_API_KEY": "sk-test"}
+    assert o.env == {
+        "ANTHROPIC_API_KEY": "sk-test",
+        "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",  # auto memory ignores setting_sources
+        "CLAUDE_CONFIG_DIR": str(tmp_path / "claude-config"),  # not the developer's ~/.claude
+    }

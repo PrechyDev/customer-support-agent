@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from customer_support_agent.agent import fallbacks
 from customer_support_agent.agent.prompt import BEHAVIOUR_CHUNK_IDS, build_system_prompt
 from customer_support_agent.kb import KBChunk, KnowledgeBase, KnowledgeBaseError
 
@@ -16,6 +17,7 @@ def test_prompt_is_assembled_from_the_kb_and_current_time():
     assert all(chunk.title in prompt for chunk in kb.chunks)  # search vocabulary
     assert all(kb.get(i).text in prompt for i in BEHAVIOUR_CHUNK_IDS)  # policy comes from the KB, not a copy
     assert "Tuesday 29 September 2026, 14:05 UTC" in prompt
+    assert fallbacks.GOODBYE in prompt  # the exact words Vapi's endCallPhrases listens for
 
 
 def test_missing_policy_section_fails_fast():

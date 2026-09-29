@@ -16,7 +16,7 @@ from customer_support_agent.kb import KnowledgeBase
 
 def make_session_factory(settings: AgentSettings, kb: KnowledgeBase, workdir: Path | None = None) -> SessionFactory:
     workdir = workdir or Path(tempfile.gettempdir()) / "relaypay-agent"
-    workdir.mkdir(parents=True, exist_ok=True)  # an empty folder for the engine, not the repo
+    (workdir / "claude-config").mkdir(parents=True, exist_ok=True)  # engine config + transcripts, not ~/.claude
 
     async def create(conversation_id: str) -> AgentSession:
         prompt = build_system_prompt(kb, datetime.now(UTC))  # built per call, so the date is current

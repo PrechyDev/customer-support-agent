@@ -3,6 +3,16 @@
 import hmac
 
 
+def describe_auth_header(header: str | None) -> str:
+    """A safe description for logs: the scheme and length, never the value."""
+    if not header:
+        return "missing"
+    scheme, _, rest = header.partition(" ")
+    if rest and scheme.lower() == "bearer":
+        return f"Bearer, {len(rest)} chars"
+    return f"no Bearer prefix, {len(header)} chars"
+
+
 def check_vapi_secret(header: str | None, secret: str) -> str | None:
     """Returns the format that matched ("bearer" or "raw"), or None if the secret is wrong or missing.
 

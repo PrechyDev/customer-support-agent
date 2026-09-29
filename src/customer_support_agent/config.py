@@ -155,9 +155,10 @@ def load_agent_settings(env: Mapping[str, str] | None = None) -> AgentSettings:
         anthropic_api_key=api_key,
         model=env.get("AGENT_MODEL", "claude-haiku-4-5-20251001"),
         max_turns=_positive_int(env, "AGENT_MAX_TURNS", 6),
-        turn_timeout_seconds=_positive_int(env, "AGENT_TURN_TIMEOUT_SECONDS", 30),
+        turn_timeout_seconds=_positive_int(env, "AGENT_TURN_TIMEOUT_SECONDS", 15),  # under Vapi's 20 s
         session_idle_seconds=_positive_int(env, "AGENT_SESSION_IDLE_SECONDS", 180),
         max_sessions=_positive_int(env, "AGENT_MAX_SESSIONS", 10),
         mcp_url=f"http://{host}:{port}/mcp",
         mcp_auth_token=_mcp_token(env),
     )
+

@@ -27,6 +27,13 @@ def test_scenario_queries_find_the_right_chunks(kb):
     assert "account-restrictions-and-suspensions" in ids(kb.search("account restricted", top_k=3))
 
 
+def test_asking_an_faq_question_finds_that_faq(kb):
+    # "what is relaypay" is just "relaypay" after common words are dropped, and that word is in
+    # nearly every chunk. The whole-heading match puts the FAQ first (a problem found in a real call).
+    assert ids(kb.search("what is relaypay"))[0] == "what-is-relaypay"
+    assert ids(kb.search("why is my payment delayed"))[0] == "why-is-my-payment-delayed"
+
+
 def test_stemming_matches_word_roots(kb):
     assert "why-is-my-payment-delayed" in ids(kb.search("delaying delays", top_k=3))  # KB says "delayed"
 

@@ -1,8 +1,14 @@
-"""One call's agent session: send the caller's words in, stream Claude's reply out.
+"""One call's agent session: send the caller's words in, get Claude's spoken reply out (SPECS §2b).
 
-`ask()` yields TextDelta pieces as the reply is written, then exactly one TurnResult.
-It never raises: every failure becomes a TurnResult with an outcome the caller of
-this module can act on (SessionManager turns outcomes into spoken fallback lines).
+`ask()` yields TextDelta pieces, then exactly one TurnResult. It never raises: every failure
+becomes a TurnResult with an outcome the SessionManager turns into a spoken line.
+
+Two rules from the conversation-flow design:
+- Complete messages: each model message is held until it ends. If it called a tool, its text was
+  narration ("Let me search...") and is dropped; otherwise it's the answer and is sent whole.
+- Clean cancellation: if a turn is abandoned (Vapi cancelled the request, or it timed out), the
+  engine is interrupted and its leftover output is drained before the next turn starts. Without
+  this, the next turn reads the old reply's leftovers as its own answer (found in real calls).
 """
 
 import asyncio
@@ -19,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 Outcome = Literal["ok", "max_turns", "error", "timeout", "busy"]
 
+DRAIN_TIMEOUT_SECONDS = 5.0  # longer than this and the session is replaced instead of reused
+
 
 @dataclass(frozen=True)
 class TextDelta:
@@ -28,13 +36,14 @@ class TextDelta:
 @dataclass(frozen=True)
 class TurnResult:
     outcome: Outcome
-    text: str = ""  # what the model said (fallback lines are not included)
+    text: str = ""  # what the caller actually heard from the model (fallback lines not included)
     tools_used: tuple[str, ...] = ()
     num_turns: int = 0
     cost_usd: float | None = None
     duration_ms: float = 0.0
     error: str | None = None
     fallback: str | None = None  # the fixed line spoken instead of / after the model's text
+    ends_call: bool = False  # the fallback line contains the end-call phrase, so Vapi hangs up
 
 
 AgentEvent = TextDelta | TurnResult
@@ -53,48 +62,57 @@ class AgentClient(Protocol):
 _DONE = object()
 
 
-def _text_delta(event: dict[str, Any]) -> str | None:
-    if event.get("type") != "content_block_delta":
-        return None
-    delta = event.get("delta") or {}
-    return delta.get("text") if delta.get("type") == "text_delta" else None
-
-
 class _Turn:
-    """What we learn while one turn's messages arrive."""
+    """Turns the SDK's messages for one turn into complete, speakable replies."""
 
-    def __init__(self) -> None:
-        self.texts: list[str] = []
+    def __init__(self, conversation_id: str) -> None:
+        self._conversation_id = conversation_id
+        self.spoken: list[str] = []
         self.tools: list[str] = []
         self.result: ResultMessage | None = None
-        self._streamed_this_message = False
-        self._spoke_before = False
+        self._saw_stream = False  # raw stream events arrived, so they (not full messages) drive speech
+        self._buffer: list[str] = []
+        self._message_calls_tool = False
 
-    def on_message(self, message: Any) -> list[str]:
-        """Returns the text pieces to speak for this message."""
+    def on_message(self, message: Any) -> str | None:
+        """Returns a complete reply to speak, or None."""
         if isinstance(message, StreamEvent):
-            piece = _text_delta(message.event)
-            if not piece:
-                return []
-            prefix = " " if self._spoke_before and not self._streamed_this_message else ""
-            self._streamed_this_message = True
-            return [prefix + piece]
-
+            self._saw_stream = True
+            return self._on_stream_event(message.event)
         if isinstance(message, AssistantMessage):
-            message_text = " ".join(b.text for b in message.content if isinstance(b, TextBlock)).strip()
             self.tools += [b.name for b in message.content if isinstance(b, ToolUseBlock)]
-            to_speak = []
-            if message_text:
-                self.texts.append(message_text)
-                if not self._streamed_this_message:  # no deltas arrived: speak the whole block
-                    to_speak.append((" " if self._spoke_before else "") + message_text)
-                self._spoke_before = True
-            self._streamed_this_message = False
-            return to_speak
-
+            if self._saw_stream:
+                return None  # already handled from the stream events
+            text = " ".join(b.text for b in message.content if isinstance(b, TextBlock)).strip()
+            calls_tool = any(isinstance(b, ToolUseBlock) for b in message.content)
+            return self._finish_message(text, calls_tool)
         if isinstance(message, ResultMessage):
             self.result = message
-        return []
+        return None
+
+    def _on_stream_event(self, event: dict[str, Any]) -> str | None:
+        kind = event.get("type")
+        if kind == "message_start":
+            self._buffer, self._message_calls_tool = [], False
+        elif kind == "content_block_start" and (event.get("content_block") or {}).get("type") == "tool_use":
+            self._message_calls_tool = True
+        elif kind == "content_block_delta":
+            delta = event.get("delta") or {}
+            if delta.get("type") == "text_delta" and delta.get("text"):
+                self._buffer.append(delta["text"])
+        elif kind == "message_stop":
+            return self._finish_message("".join(self._buffer).strip(), self._message_calls_tool)
+        return None
+
+    def _finish_message(self, text: str, calls_tool: bool) -> str | None:
+        if not text:
+            return None
+        if calls_tool:
+            logger.debug("Dropped narration before a tool call (conversation=%s): %r", self._conversation_id, text)
+            return None
+        piece = (" " if self.spoken else "") + text
+        self.spoken.append(text)
+        return piece
 
 
 class AgentSession:
@@ -102,6 +120,8 @@ class AgentSession:
         self._client = client
         self.conversation_id = conversation_id
         self._timeout = turn_timeout_seconds
+        self._cleanup: asyncio.Task[None] | None = None  # drain of an abandoned turn
+        self.broken = False  # the engine couldn't be brought back to a clean state
 
     async def start(self) -> None:
         """Starts the engine and connects to MCP. Errors propagate: the manager decides what the caller hears."""
@@ -110,8 +130,17 @@ class AgentSession:
         logger.info("Agent session started (conversation=%s, %.0f ms)", self.conversation_id,
                     (time.perf_counter() - started) * 1000)
 
+    async def ready(self) -> bool:
+        """Waits for any cleanup of an abandoned turn. False means replace this session."""
+        if self._cleanup is not None:
+            await self._cleanup
+            self._cleanup = None
+        return not self.broken
+
     async def close(self) -> None:
         try:
+            if self._cleanup is not None and not self._cleanup.done():
+                self._cleanup.cancel()
             await self._client.disconnect()
             logger.info("Agent session closed (conversation=%s)", self.conversation_id)
         except Exception:
@@ -119,24 +148,23 @@ class AgentSession:
 
     async def ask(self, message: str) -> AsyncIterator[AgentEvent]:
         started = time.perf_counter()
-        turn = _Turn()
+        turn = _Turn(self.conversation_id)
         queue: asyncio.Queue[Any] = asyncio.Queue()
         pump = asyncio.create_task(self._pump(message, queue))
         deadline = asyncio.get_running_loop().time() + self._timeout
         outcome: Outcome = "ok"
         error: str | None = None
-        engine_running = True  # until the engine reports it's done, or we've stopped it
 
         try:
             while True:
                 remaining = deadline - asyncio.get_running_loop().time()
                 item = await asyncio.wait_for(queue.get(), timeout=max(remaining, 0))
                 if item is _DONE:
-                    engine_running = False
                     break
                 if isinstance(item, BaseException):
                     raise item
-                for piece in turn.on_message(item):
+                piece = turn.on_message(item)
+                if piece:
                     yield TextDelta(piece)
             outcome, error = self._outcome(turn.result)
         except TimeoutError:
@@ -145,18 +173,16 @@ class AgentSession:
             outcome, error = "error", f"{type(exc).__name__}: {exc}"
             logger.exception("Agent turn failed (conversation=%s)", self.conversation_id)
         finally:
-            # Also runs when the reader stops early: the caller talked over the agent and Vapi
-            # dropped the request. Stop the engine so the next message doesn't wait for a reply nobody hears.
-            if engine_running:
+            if not pump.done():
+                # Abandoned mid-turn (Vapi cancelled it, or it timed out). The drain runs as its own
+                # task: the request that owns this code may be cancelled repeatedly, so it can't wait here.
                 if outcome == "ok":
                     logger.info("Agent turn cancelled mid-reply (conversation=%s)", self.conversation_id)
-                await self._interrupt()
-            if not pump.done():
-                pump.cancel()
+                self._cleanup = asyncio.create_task(self._stop_and_drain(pump))
 
         result = TurnResult(
             outcome=outcome,
-            text=" ".join(turn.texts),
+            text=" ".join(turn.spoken),
             tools_used=tuple(turn.tools),
             num_turns=turn.result.num_turns if turn.result else 0,
             cost_usd=turn.result.total_cost_usd if turn.result else None,
@@ -171,21 +197,31 @@ class AgentSession:
         yield result
 
     async def _pump(self, message: str, queue: asyncio.Queue[Any]) -> None:
-        """Reads SDK messages into the queue, so the reader can apply one deadline to the whole turn."""
+        """Reads one response from the SDK (it ends at the ResultMessage) into the queue."""
         try:
             await self._client.query(message)
             async for item in self._client.receive_response():
+                logger.debug("Engine step (conversation=%s): %s", self.conversation_id, _describe(item))
                 await queue.put(item)
         except Exception as exc:  # handed to the reader, which reports it
             await queue.put(exc)
         finally:
             await queue.put(_DONE)
 
-    async def _interrupt(self) -> None:
+    async def _stop_and_drain(self, pump: asyncio.Task[None]) -> None:
+        """Interrupts the engine, then lets the pump read the rest of that response and throw it away."""
         try:
             await self._client.interrupt()
         except Exception:
-            logger.exception("Could not interrupt timed-out turn (conversation=%s)", self.conversation_id)
+            logger.exception("Could not interrupt abandoned turn (conversation=%s)", self.conversation_id)
+        try:
+            await asyncio.wait_for(asyncio.shield(pump), timeout=DRAIN_TIMEOUT_SECONDS)
+            logger.debug("Drained abandoned turn (conversation=%s)", self.conversation_id)
+        except TimeoutError:
+            pump.cancel()
+            self.broken = True
+            logger.warning("Abandoned turn didn't finish draining; session will be replaced (conversation=%s)",
+                           self.conversation_id)
 
     @staticmethod
     def _outcome(result: ResultMessage | None) -> tuple[Outcome, str | None]:
@@ -196,3 +232,14 @@ class AgentSession:
         if result.is_error or result.subtype != "success":
             return "error", f"{result.subtype}: {result.errors or ''}".strip()
         return "ok", None
+
+
+def _describe(item: Any) -> str:
+    """Short, content-free description of an engine message, for debug logs."""
+    if isinstance(item, StreamEvent):
+        event = item.event
+        block = (event.get("content_block") or {}).get("type")
+        return f"stream:{event.get('type')}" + (f":{block}" if block else "")
+    if isinstance(item, ResultMessage):
+        return f"result:{item.subtype}"
+    return type(item).__name__

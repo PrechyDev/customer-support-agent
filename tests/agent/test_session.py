@@ -1,67 +1,79 @@
 import asyncio
 
+from customer_support_agent.agent import session as session_module
 from customer_support_agent.agent.session import AgentSession, TextDelta
-from tests.agent.fakes import FakeClient, assistant, delta, result, text, tool_use
-
-KB_TOOL = "mcp__relaypay__search_knowledge_base"
+from tests.agent.fakes import KB_TOOL, FakeClient, assistant_only, reply, result
 
 
-def turn(client, timeout=5):
-    async def collect():
-        return [e async for e in AgentSession(client, "call-1", turn_timeout_seconds=timeout).ask("fees?")]
+def collect(session, message="fees?"):
+    async def run():
+        return [e async for e in session.ask(message)]
 
-    events = asyncio.run(collect())
-    return "".join(e.text for e in events if isinstance(e, TextDelta)), events[-1]
-
-
-def test_streams_the_reply_and_reports_the_turn():
-    client = FakeClient([[
-        delta("Let me check "), delta("that."), assistant(text("Let me check that."), tool_use(KB_TOOL)),
-        delta("Fees depend on the corridor."), assistant(text("Fees depend on the corridor.")),
-        result(num_turns=2, cost=0.0031),
-    ]])
-    spoken, result_ = turn(client)
-    assert spoken == "Let me check that. Fees depend on the corridor."  # space between messages
-    assert (result_.outcome, result_.tools_used, result_.num_turns, result_.cost_usd) == ("ok", (KB_TOOL,), 2, 0.0031)
+    return asyncio.run(run())
 
 
-def test_full_text_is_spoken_when_no_stream_pieces_arrive():
-    spoken, _ = turn(FakeClient([[assistant(text("Hello, how can I help?")), result()]]))
-    assert spoken == "Hello, how can I help?"
+def spoken(events) -> str:
+    return "".join(e.text for e in events if isinstance(e, TextDelta))
+
+
+def test_narration_before_a_tool_is_dropped_and_the_answer_sent_whole():
+    client = FakeClient([[*reply("Let me search for that.", tool=KB_TOOL),
+                          *reply("Fees depend on the corridor."), result(num_turns=2, cost=0.0031)]])
+    events = collect(AgentSession(client, "call-1", turn_timeout_seconds=5))
+    assert [e.text for e in events if isinstance(e, TextDelta)] == ["Fees depend on the corridor."]  # one piece
+    turn = events[-1]
+    assert (turn.outcome, turn.text, turn.tools_used, turn.num_turns, turn.cost_usd) == (
+        "ok", "Fees depend on the corridor.", (KB_TOOL,), 2, 0.0031)
+
+
+def test_without_stream_events_full_messages_are_used_the_same_way():
+    client = FakeClient([[assistant_only("Let me check.", tool=KB_TOOL), assistant_only("Hello, how can I help?"), result()]])
+    assert spoken(collect(AgentSession(client, "call-1", turn_timeout_seconds=5))) == "Hello, how can I help?"
 
 
 def test_sdk_results_map_to_outcomes():
-    cases = {
-        "max_turns": [result(subtype="error_max_turns", is_error=True, num_turns=6)],
-        "error": [result(subtype="error_during_execution", is_error=True)],
-    }
+    cases = {"max_turns": [result(subtype="error_max_turns", is_error=True, num_turns=6)],
+             "error": [result(subtype="error_during_execution", is_error=True)]}
     for expected, script in cases.items():
-        assert turn(FakeClient([script]))[1].outcome == expected
-    assert turn(FakeClient([[assistant(text("Hi"))]]))[1].outcome == "error"  # no result message
+        assert collect(AgentSession(FakeClient([script]), "c", turn_timeout_seconds=5))[-1].outcome == expected
+    assert collect(AgentSession(FakeClient([reply("Hi")]), "c", turn_timeout_seconds=5))[-1].outcome == "error"  # no result
 
 
 def test_client_exception_becomes_an_error_result():
-    _, result_ = turn(FakeClient(query_error=RuntimeError("connection reset")))
-    assert result_.outcome == "error" and "connection reset" in result_.error
+    turn = collect(AgentSession(FakeClient(query_error=RuntimeError("connection reset")), "c", turn_timeout_seconds=5))[-1]
+    assert turn.outcome == "error" and "connection reset" in turn.error
 
 
-def test_slow_turn_times_out_and_interrupts_the_engine():
-    client = FakeClient([[]], hang=True)
-    assert turn(client, timeout=0.1)[1].outcome == "timeout"
-    assert client.interrupted is True
-
-
-def test_cancelled_turn_interrupts_the_engine():
-    """Caller talks over the agent: Vapi drops the request, so we stop the engine instead of finishing."""
-    client = FakeClient([[delta("Fees depend "), delta("on the corridor.")]], hang=False)
+def test_abandoned_turn_is_drained_so_the_next_turn_hears_its_own_answer():
+    """Regression: a cancelled reply's leftovers were read by the next turn as its answer (found in real calls)."""
+    client = FakeClient([[*reply("Could you tell me more about what you'd like to know?", pieces=6), result()],
+                         [*reply("Exchange rates aren't fixed."), result()]], slow_seconds=0.01)
+    session = AgentSession(client, "call-1", turn_timeout_seconds=5)
 
     async def scenario():
-        stream = AgentSession(client, "call-1", turn_timeout_seconds=5).ask("fees?")
-        await anext(stream)  # first piece spoken, then the caller interrupts
-        await stream.aclose()
+        first = session.ask("okay")
+        await anext(first)  # reading has started...
+        await first.aclose()  # ...then Vapi cancels the request (barge-in / revised transcript)
+        assert await session.ready()  # the next turn waits for the drain
+        return [e async for e in session.ask("okay, is there anything I need to know?")]
 
-    asyncio.run(scenario())
+    events = asyncio.run(scenario())
     assert client.interrupted is True
+    assert spoken(events) == "Exchange rates aren't fixed."  # its own answer, not the old leftovers
+
+
+def test_turn_that_cannot_be_drained_marks_the_session_for_replacement(monkeypatch):
+    monkeypatch.setattr(session_module, "DRAIN_TIMEOUT_SECONDS", 0.05)
+    client = FakeClient([[]], hang=True)
+    session = AgentSession(client, "call-1", turn_timeout_seconds=0.1)
+
+    async def scenario():
+        turn = [e async for e in session.ask("fees?")][-1]
+        return turn, await session.ready()
+
+    turn, usable = asyncio.run(scenario())
+    assert turn.outcome == "timeout" and client.interrupted is True
+    assert usable is False
 
 
 def test_start_connects_and_close_never_raises():

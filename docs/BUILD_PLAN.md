@@ -23,14 +23,21 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [x] Add `fastapi`
 - [x] Copy the KB into the repo at `data/relaypay-knowledge-base.md` (the reference folder isn't deployed)
 - [x] Check whether the Agent SDK bundles the Claude Code CLI: **it doesn't on Windows** (`_bundled/` is empty)
-- [ ] Install the CLI locally: `npm install -g @anthropic-ai/claude-code` (and check the Linux image at deploy)
+- [x] Install the **native** Claude Code on Windows: `irm https://claude.ai/install.ps1 | iex`. The SDK finds `~/.local/bin/claude.exe` itself (verified). On Linux/Cloud Run the SDK wheel bundles Claude Code, so nothing to install
 - [x] `kb/`: load the KB, split it into 37 chunks, BM25 + stemmer index, with unit tests
 - [x] `mcp_server/`: Streamable HTTP on 127.0.0.1:8001, bearer token, `X-Conversation-Id` header, `search_knowledge_base`, retrievals logged to `logs/retrieval.jsonl`, tests incl. end-to-end over HTTP
 - [ ] Generate `MCP_AUTH_TOKEN` and add it to `.env`
 - [x] `agent/`: prompt (37 headings, KB policy sections, date), locked-down SDK options, one session per call with per-call lock, 30 s turn timeout, fallback lines, idle cleanup (180 s), 10-call cap, tests with a fake client (suite trimmed to 50 lean tests)
 - [x] `api/`: `POST /chat/completions` (Vapi secret, OpenAI SSE streaming, non-stream fallback, barge-in interrupts the engine, per-turn latency log), `/health`, one start command `poetry run relaypay-backend` (MCP first, then public app)
 - [ ] Vapi assistant set up (see Setup checklist), with ngrok running
+- [ ] Vapi `endCallPhrases: ["This call will now end"]` on the assistant (ends the call after the technical/busy goodbye lines)
 - [ ] Vapi silence hooks: 60 s "are you still there" message, 120 s goodbye + endCall, reset on caller speech (save in `docs/vapi-assistant.json`)
+- [x] First voice calls (Haiku 4.5): calls work end to end. Found: invented details, unusable questions (loops), answering before searching, spoken reasoning, no goodbye, pointless filler, dropped words
+- [x] Fixes: grounding prompt rewrite, FAQ question match in search, goodbye phrase, backend filler after 2 s, debug log of the exact text sent to Vapi
+- [ ] Vapi: `endCallPhrases` = both phrases, voice `language: "en"` (suspect for dropped words)
+- [x] **Conversation flow (SPECS §2b):** drain interrupted turns · complete messages (drop narration) · empty reply from spoken text · waiting ladder 2 s / 8 s / 15 s · warm closing line · realistic shared-stream fake engine in tests
+- [ ] Vapi: LiveKit endpointing, `waitSeconds` 0.6, `stopSpeakingPlan.numWords` 2
+- [ ] Re-run the two failing conversations with LOG_LEVEL=DEBUG; compare "Sent to Vapi" with Vapi's transcript word by word
 - [ ] Voice test: Haiku 4.5
 - [ ] Voice test: Sonnet 5
 - [ ] Results and model decision in `submission/LATENCY_RESULTS.md`, plus the model choice in the reflections notes
@@ -72,6 +79,7 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [ ] Logging after the response, errors caught
 - [ ] Log-only phrase check
 - [ ] Vapi end-of-call webhook: closes the conversation, `abandoned` if it never arrives
+- [ ] Vapi call-started webhook: start the agent session while the greeting plays (removes the cold start from the first answer)
 - [ ] Rate limiting on public endpoints
 - [ ] Attempt limits (verification, repeated sensitive requests)
 
@@ -110,6 +118,10 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [ ] Loom (5–8 min), with audio checked
 - [ ] `submission/SUBMISSION_CHECKLIST.md` all ticked
 
+## After grading (cleanup)
+- [ ] Rotate `VAPI_LLM_SECRET`: it's attached to the assistant as an assistant-level Custom LLM credential, which is **visible in the assistant JSON to everyone in the shared Vapi org**. Generate a new one, update `.env`, and re-run the credential PATCH.
+- [ ] Rotate `MCP_AUTH_TOKEN` and the Vapi private key if they were ever shown on screen
+
 ---
 
 ## Setup checklist (accounts, keys, tools)
@@ -145,7 +157,9 @@ Goal: measure latency and accuracy by voice before building the rest.
 
 Items marked *(verify)* get confirmed when we reach Phase 7.
 
-1. **Container:** Python 3.12 slim image, Poetry install without dev dependencies, runs `uvicorn`. If the Agent SDK needs the Claude Code CLI and doesn't bundle it, add Node and the CLI to the image *(verify)*.
+1. **Container:** `python:3.12-slim` (Debian, glibc), Poetry install without dev dependencies, runs `relaypay-backend` with `HOST=0.0.0.0`. **No Claude Code install needed:** the SDK's Linux wheel (`manylinux_2_17_x86_64`, in `poetry.lock`) bundles it. Run as a non-root user with a writable home and `/tmp` (the agent's working and config folders live there).
+   - **Sizing (Agent SDK hosting docs):** about **1 GiB RAM and 1 CPU per concurrent agent session**. Set `AGENT_MAX_SESSIONS` to what the instance can hold, e.g. 4 GiB / 2 vCPU → `AGENT_MAX_SESSIONS=3`. Note that Cloud Run's `/tmp` is in memory, so it counts toward RAM.
+   - **One instance only (`--max-instances 1`):** each call's agent session lives in that instance's memory. A second instance wouldn't have it, so a caller whose next message landed there would lose the conversation. Scaling out later needs a `SessionStore` (hosting docs, "hybrid sessions") or session pinning.
 2. **Secrets:** create each one in Secret Manager (`ANTHROPIC_API_KEY`, `DATABASE_URL`, `VAPI_LLM_SECRET`, console login) and mount them as env variables. Never bake them into the image.
 3. **Deploy:** `gcloud run deploy relaypay-support --source . --region europe-west1 --min-instances 1 --set-secrets ...` *(verify flags)*.
    - **min instances 1:** no cold start at the beginning of a call. The cost trade-off is recorded in the reflections.

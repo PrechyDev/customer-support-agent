@@ -1,9 +1,11 @@
+import asyncio
 import json
 
 from fastapi.testclient import TestClient
 
+from customer_support_agent.agent import fallbacks
 from customer_support_agent.api.app import create_app
-from customer_support_agent.api.auth import check_vapi_secret
+from customer_support_agent.api.auth import check_vapi_secret, describe_auth_header
 from customer_support_agent.agent.session import TextDelta, TurnResult
 
 SECRET = "v" * 32
@@ -52,6 +54,24 @@ def test_streams_the_agent_reply_as_sse():
     assert manager.closed_all  # sessions closed on shutdown
 
 
+def test_waiting_ladder_only_speaks_when_the_reply_is_slow():
+    class SlowManager(FakeManager):
+        async def ask(self, call_id, message):
+            await asyncio.sleep(0.4)  # e.g. a slow tool call
+            async for event in super().ask(call_id, message):
+                yield event
+
+    auth = {"Authorization": f"Bearer {SECRET}"}
+    with TestClient(create_app(SlowManager(), vapi_secret=SECRET, filler_after=0.05, reassure_after=0.2)) as c:
+        slow = contents(c.post("/chat/completions", json=BODY, headers=auth).text)
+    with TestClient(create_app(FakeManager(), vapi_secret=SECRET, filler_after=0.5, reassure_after=1.0)) as c:
+        fast = contents(c.post("/chat/completions", json=BODY, headers=auth).text)
+
+    filler = next(f for f in fallbacks.FILLERS if slow.startswith(f))  # one of the varied fillers
+    assert slow == f"{filler} {fallbacks.REASSURANCE} Fees depend on the corridor."
+    assert fast == "Fees depend on the corridor."
+
+
 def test_non_streaming_request_gets_one_json_reply():
     with client(FakeManager()) as c:
         response = c.post("/chat/completions", json={**BODY, "stream": False}, headers={"Authorization": SECRET})
@@ -69,8 +89,23 @@ def test_rejects_bad_secret_and_bad_body_and_serves_health():
     assert manager.asked == []
 
 
+def test_secret_in_custom_header_is_accepted_even_with_a_foreign_authorization():
+    """Shared Vapi org: Authorization carries the org's key, our secret comes in X-RelayPay-Secret."""
+    manager = FakeManager()
+    with client(manager) as c:
+        headers = {"Authorization": "Bearer someone-elses-org-key", "X-RelayPay-Secret": SECRET}
+        assert c.post("/chat/completions", json=BODY, headers=headers).status_code == 200
+        wrong = {"Authorization": "Bearer someone-elses-org-key", "X-RelayPay-Secret": "nope"}
+        assert c.post("/chat/completions", json=BODY, headers=wrong).status_code == 401
+    assert len(manager.asked) == 1
+
+
 def test_secret_check_accepts_bearer_or_raw_value():
     assert check_vapi_secret(f"Bearer {SECRET}", SECRET) == "bearer"
     assert check_vapi_secret(SECRET, SECRET) == "raw"
     assert check_vapi_secret("Bearer nope", SECRET) is None
     assert check_vapi_secret(None, SECRET) is None
+    # rejection logs describe the header without its value
+    assert describe_auth_header(None) == "missing"
+    assert describe_auth_header("Bearer abc") == "Bearer, 3 chars"
+    assert describe_auth_header("abcd") == "no Bearer prefix, 4 chars"

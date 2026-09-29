@@ -5,6 +5,7 @@ the public app. If either stops, the other stops too.
 """
 
 import asyncio
+import contextlib
 import logging
 import sys
 
@@ -57,7 +58,11 @@ def main() -> int:
     app = create_app(manager, vapi_secret=backend.vapi_llm_secret)
 
     logger.info("Agent model: %s", agent_settings.model)
-    return asyncio.run(_serve(app, mcp_app, backend.host, backend.port, mcp_settings.mcp_host, mcp_settings.mcp_port))
+    try:
+        return asyncio.run(_serve(app, mcp_app, backend.host, backend.port, mcp_settings.mcp_host, mcp_settings.mcp_port))
+    except KeyboardInterrupt:  # Ctrl+C: both servers have already shut down cleanly
+        logger.info("Backend stopped")
+        return 0
 
 
 async def _serve(app: ASGIApp, mcp_app: ASGIApp, host: str, port: int, mcp_host: str, mcp_port: int) -> int:
@@ -76,7 +81,8 @@ async def _serve(app: ASGIApp, mcp_app: ASGIApp, host: str, port: int, mcp_host:
         await public.serve()
     finally:
         mcp.should_exit = True
-        await mcp_task
+        with contextlib.suppress(asyncio.CancelledError):  # Ctrl+C cancels it; that's a normal stop
+            await mcp_task
     return 0
 
 

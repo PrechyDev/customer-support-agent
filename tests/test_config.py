@@ -33,7 +33,7 @@ def test_invalid_port_and_log_level_raise():
 def test_agent_defaults_and_mcp_url():
     s = load_agent_settings({**AGENT, "MCP_PORT": "9001"})
     assert (s.model, s.max_turns, s.turn_timeout_seconds, s.session_idle_seconds, s.max_sessions) == (
-        "claude-haiku-4-5-20251001", 6, 30, 180, 10)
+        "claude-haiku-4-5-20251001", 6, 15, 180, 10)
     assert s.mcp_url == "http://127.0.0.1:9001/mcp"
 
 

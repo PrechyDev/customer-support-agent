@@ -32,4 +32,4 @@ def test_factory_builds_a_started_session_with_locked_down_options(monkeypatch, 
     assert client.connected is True
     assert client.options.mcp_servers["relaypay"]["headers"]["X-Conversation-Id"] == "call-9"
     assert "KNOWLEDGE BASE SECTIONS" in client.options.system_prompt
-    assert (tmp_path / "agent").is_dir()  # empty working folder was created
+    assert (tmp_path / "agent" / "claude-config").is_dir()  # working folder + engine config folder created

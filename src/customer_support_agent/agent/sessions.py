@@ -21,6 +21,7 @@ class _Entry:
     session: AgentSession | None = None
     last_used: float = 0.0
     max_turn_hits: int = 0
+    technical_failures_in_row: int = 0
 
 
 class SessionManager:
@@ -46,26 +47,33 @@ class SessionManager:
         if entry is None:
             if len(self._entries) >= self._max_sessions:
                 logger.warning("Refused new call: %d sessions already open", len(self._entries))
-                yield TextDelta(fallbacks.BUSY)
-                yield TurnResult(outcome="busy", fallback=fallbacks.BUSY)
+                yield TextDelta(fallbacks.BUSY_GOODBYE)
+                yield TurnResult(outcome="busy", fallback=fallbacks.BUSY_GOODBYE, ends_call=True)
                 return
             # Registered before any await, so a second message for this call finds it and waits on the lock.
             entry = self._entries[conversation_id] = _Entry(last_used=self._clock())
 
         async with entry.lock:
+            # Waits for any drain of an abandoned turn, so this turn starts on a clean stream.
+            if entry.session is not None and not await entry.session.ready():
+                logger.warning("Replacing agent session that couldn't be cleaned (conversation=%s)", conversation_id)
+                await entry.session.close()
+                entry.session = None
             if entry.session is None:
                 try:
                     entry.session = await self._factory(conversation_id)
                 except Exception as exc:
+                    # Retrying within the call can't fix an engine that won't start: end the call clearly.
                     logger.exception("Could not start agent session (conversation=%s)", conversation_id)
                     self._entries.pop(conversation_id, None)
-                    yield TextDelta(fallbacks.TECHNICAL_PROBLEM)
+                    yield TextDelta(fallbacks.TECHNICAL_GOODBYE)
                     yield TurnResult(outcome="error", error=f"session start failed: {exc}",
-                                     fallback=fallbacks.TECHNICAL_PROBLEM)
+                                     fallback=fallbacks.TECHNICAL_GOODBYE, ends_call=True)
                     return
 
             entry.last_used = self._clock()
             spoke = False
+            ends_call = False
             # aclosing: if our reader stops early (barge-in), the session's stream is closed too,
             # which interrupts the engine.
             async with aclosing(entry.session.ask(message)) as turn:
@@ -74,22 +82,29 @@ class SessionManager:
                         spoke = True
                         yield event
                         continue
-                    line = self._fallback_for(entry, event)
+                    line, ends_call = self._fallback_for(entry, event)
                     if line:
                         yield TextDelta((" " if spoke else "") + line)
-                    yield replace(event, fallback=line)
+                    yield replace(event, fallback=line, ends_call=ends_call)
             entry.last_used = self._clock()
+            if ends_call:  # Vapi hangs up on the end-call phrase; free the engine now
+                await self.close(conversation_id)
 
     @staticmethod
-    def _fallback_for(entry: _Entry, result: TurnResult) -> str | None:
+    def _fallback_for(entry: _Entry, result: TurnResult) -> tuple[str | None, bool]:
+        """Returns (line to speak, whether it ends the call)."""
+        if result.outcome in ("error", "timeout"):
+            entry.technical_failures_in_row += 1
+            if entry.technical_failures_in_row >= fallbacks.MAX_TECHNICAL_FAILURES:
+                return fallbacks.TECHNICAL_GOODBYE, True
+            return fallbacks.TECHNICAL_PROBLEM, False
+        entry.technical_failures_in_row = 0  # any other outcome breaks the run of failures
         if result.outcome == "max_turns":
             entry.max_turn_hits += 1
-            return fallbacks.MAX_TURNS_FIRST if entry.max_turn_hits == 1 else fallbacks.MAX_TURNS_REPEAT
-        if result.outcome in ("error", "timeout"):
-            return fallbacks.TECHNICAL_PROBLEM
+            return (fallbacks.MAX_TURNS_FIRST if entry.max_turn_hits == 1 else fallbacks.MAX_TURNS_REPEAT), False
         if result.outcome == "ok" and not result.text:
-            return fallbacks.EMPTY_REPLY
-        return None
+            return fallbacks.EMPTY_REPLY, False
+        return None, False
 
     async def close(self, conversation_id: str) -> None:
         entry = self._entries.pop(conversation_id, None)

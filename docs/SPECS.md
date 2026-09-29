@@ -66,6 +66,49 @@ After an escalation, the agent stops trying to solve *that* issue, but can still
 
 ---
 
+### Grounding rules (after the first test calls)
+
+The agent: searches before **every** product or policy answer, including follow-ups; says **only** what the returned text states (no added amounts, currencies, payment methods, country rules, timelines or factors); says plainly when it lacks a detail, shares what the KB does say, and offers a specialist; asks a question only if the answer changes what it can say or do; never narrates or describes the customer; gives one answer per reply. Asking again for something it doesn't have → escalate.
+
+---
+
+## 2b. Conversation flow (turn-taking, speaking, waiting, ending)
+
+Designed after the first voice tests, where early guesses by Vapi caused double requests, an interrupted reply leaked into the next turn, the model's narration was spoken, and the goodbye felt abrupt.
+
+**Principle: any request can be cancelled at any moment, and the backend must always leave the conversation clean.**
+
+**1. Listening (Vapi assistant settings)**
+- End-of-turn detection: `startSpeakingPlan.smartEndpointingPlan.provider = "livekit"` (Vapi recommends it for English: it reads the words, not just pauses).
+- `startSpeakingPlan.waitSeconds = 0.6` (default 0.4): a slightly longer beat before replying means fewer false starts.
+- `stopSpeakingPlan.numWords = 2`: noise and "uh" don't cut Bex off. Real interruptions ("no", "wait", "actually") still work instantly (Vapi's built-in list).
+
+**2. Backend turn rules**
+- One turn at a time per call (per-call lock).
+- When Vapi cancels a request (a newer one replaces it, or the caller barges in): **interrupt** the engine, then **drain** its leftover output up to the end-of-turn marker, **before** the next turn starts. If draining takes more than a few seconds, close the session; the next message starts a fresh one.
+
+**3. Speaking: complete messages (option B)**
+- Each model message is held until it ends. If it called a tool, its text was narration: **dropped** (logged at debug). Otherwise it's the answer: **sent whole**.
+- "Empty reply" is decided from what was actually spoken.
+- Trade-off: the first word comes about 0.5–1 s later than word-by-word streaming, but narration can never be spoken, and the voice gets whole sentences.
+
+**4. Waiting ladder (no reply text yet)**
+
+| Time into the turn | Caller hears |
+|---|---|
+| 0–2 s | nothing (most replies arrive here) |
+| 2 s | a varied filler: "One moment, please." / "Let me check on that." / "Just a second." |
+| 8 s | "Thanks for bearing with me, I'm still on it." |
+| 15 s | the turn times out, then the technical-failure flow (§11). Vapi's own Custom LLM timeout is 20 s, so ours fires first. |
+
+**5. Cold start (Phase 5):** start the call's agent session when Vapi reports the call has started (webhook to `assistant.server`), so the first answer doesn't pay the 0.8–1.8 s engine start.
+
+**6. Tools (Phase 3):** each tool call costs one model round trip, so the model may call several tools in one step, and logging is done by the backend, not a tool. Each tool has its own time limit (e.g. 5 s for database calls) and returns a structured error.
+
+**7. Ending:** Vapi hangs up as soon as it finishes speaking a trigger phrase, and has no delay setting, so the closing line itself is warm and complete, with the trigger phrase **as the last words**: "You're welcome, I'm glad I could help. If anything else comes up, you can reach us any time through your RelayPay dashboard. Have a great day, and thanks for calling RelayPay."
+
+---
+
 ## 3. Identity verification (customer lookups)
 
 1. The agent asks for **email and company name**, in any order.
@@ -205,6 +248,7 @@ After an escalation, the agent stops trying to solve *that* issue, but can still
 - **Only called for** product and policy questions, not for greetings or pure lookups.
 - **Returns** the **top 5** chunks with a score above zero, each with a chunk ID, source title, text and score. The chunk IDs are what get logged.
 - **The system prompt lists all 37 chunk headings** (about 300 tokens, cached), so the agent knows the KB's vocabulary when it rewrites a query, and can decline without searching when a topic isn't covered.
+- **FAQ question match:** if every word of an FAQ question heading (common words included) is in the query, that chunk gets a +5 bonus. Without it, "what is relaypay" is just "relaypay" to BM25, a word in nearly every chunk, and the FAQ didn't rank (found in a real call). Topic headings ("International Payments") don't get the bonus: they're too easy to match.
 - **Common words are dropped** before searching ("what", "is", "the"…), so they don't match FAQ headings like "What Is RelayPay?".
 - **Measured:** 37 chunks, 382 distinct stemmed words, index about 15 KB, loading and indexing about 40 ms, one search about 0.2 ms.
 - **No results, or only weak matches → decline or escalate.** Never answer from general knowledge.
@@ -292,9 +336,13 @@ Based on `mcp-tool-requirements.md`. Deviations from the spec are marked **Δ**.
 | Agent hits its turn limit (`AGENT_MAX_TURNS=6` per caller message; the SDK reports `error_max_turns`) | The call continues. The first time in a call, the caller hears "Sorry, I didn't manage to finish that. Could you say it another way?" The second time, the agent offers a specialist and escalates. Both are logged. |
 | Caller goes silent | **Set up in Vapi** (hooks on `customer.speech.timeout`, reset when the caller speaks). At 60 s: "I haven't heard from you in a minute. Would you like to continue, or shall I end the call?" At 120 s: "I'll end the call now. Thanks for contacting RelayPay." and then `endCall`. |
 | Agent session left open | The backend closes a call's session when the call ends (end-of-call report), or after **3 idle minutes** as a safety net. That's longer than Vapi's 2, so a late reply never hits a closed session. |
-| Too many calls at once (more than `AGENT_MAX_SESSIONS`, default 10) | "We're very busy right now. Please try again in a few minutes." |
+| Too many calls at once (more than `AGENT_MAX_SESSIONS`, default 10) | "Sorry, we're very busy right now. Please call back in a few minutes. This call will now end." Vapi hangs up. |
 | Caller talks over the agent (barge-in): Vapi drops the request mid-reply | The agent interrupts the engine straight away, so the caller's next message doesn't wait for a reply nobody will hear. Logged as a cancelled turn. |
-| Claude API error or timeout | The backend streams a fixed spoken fallback line. There is never silence. |
+| Claude API error or timeout (a turn fails) | **1st failure:** "Sorry, I had a technical problem. Could you say that again?" (a question, so the caller knows to speak). **2nd failure in a row:** "I'm sorry, I'm having technical problems and can't help right now. Please try again later, or reach our support team through your RelayPay dashboard. This call will now end." Vapi hangs up and the session is closed. A successful turn resets the count. No escalation. |
+| The agent engine can't start (retrying within the call can't fix it) | The same closing line straight away, and Vapi hangs up. |
+| **How calls are ended** | The closing lines end with **"This call will now end."**, set in the Vapi assistant's `endCallPhrases`. Vapi hangs up when the assistant says it. Only the closing lines contain it (a test checks this), and the prompt tells the agent never to say it. |
+| Caller is done ("no, that's all", "bye") | The agent says the warm closing line from §2b, ending with "thanks for calling RelayPay", which is also in Vapi's `endCallPhrases`, so Vapi hangs up. The prompt forbids that phrase at any other time, and a test checks no fallback line contains it. |
+| A reply is slow | The **backend** (not the model) follows the waiting ladder in §2b: a varied filler at 2 s, a reassurance at 8 s, a timeout at 15 s. Fast replies never hear it. The model is told never to narrate ("let me search…"), because the search itself takes about 0.2 ms, so a narrated filler was always followed by an instant answer. |
 | Logging fails | Never blocks or breaks the reply. Logs are written after the response, with errors caught. |
 | Call drops | The conversation is closed when Vapi's end-of-call report arrives, and marked `abandoned` if it never does. |
 | Unknown status or bad data | Escalate, never guess. |

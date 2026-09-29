@@ -1,25 +1,44 @@
-"""A stand-in for the SDK client, so agent tests never call Claude."""
+"""A stand-in for the SDK client, so agent tests never call Claude.
+
+Like the real engine, it has ONE continuous output stream shared by all turns: each
+receive_response() reads until the next ResultMessage. So if a turn stops reading early and
+nothing drains the rest, the next turn reads the leftovers (the bug this fake now reproduces).
+"""
 
 import asyncio
+from collections import deque
 
 from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolUseBlock
 from claude_agent_sdk.types import StreamEvent
 
-
-def delta(text: str) -> StreamEvent:
-    return StreamEvent(uuid="u", session_id="s", event={"type": "content_block_delta", "delta": {"type": "text_delta", "text": text}})
+KB_TOOL = "mcp__relaypay__search_knowledge_base"
 
 
-def assistant(*blocks) -> AssistantMessage:
-    return AssistantMessage(content=list(blocks), model="test-model")
+def _event(event: dict) -> StreamEvent:
+    return StreamEvent(uuid="u", session_id="s", event=event)
 
 
-def text(value: str) -> TextBlock:
-    return TextBlock(text=value)
+def reply(text: str | None = None, tool: str | None = None, pieces: int = 2) -> list:
+    """One model message as the real stream sends it: start, text deltas, optional tool call, stop,
+    then the full AssistantMessage record."""
+    out = [_event({"type": "message_start", "message": {"id": "m"}})]
+    if text:
+        out.append(_event({"type": "content_block_start", "content_block": {"type": "text"}}))
+        size = max(1, len(text) // pieces)
+        for i in range(0, len(text), size):
+            out.append(_event({"type": "content_block_delta", "delta": {"type": "text_delta", "text": text[i:i + size]}}))
+    if tool:
+        out.append(_event({"type": "content_block_start", "content_block": {"type": "tool_use", "name": tool}}))
+    out.append(_event({"type": "message_stop"}))
+    blocks = ([TextBlock(text=text)] if text else []) + ([ToolUseBlock(id="t1", name=tool, input={})] if tool else [])
+    out.append(AssistantMessage(content=blocks, model="test-model"))
+    return out
 
 
-def tool_use(name: str) -> ToolUseBlock:
-    return ToolUseBlock(id="t1", name=name, input={"query": "fees"})
+def assistant_only(text: str | None = None, tool: str | None = None) -> AssistantMessage:
+    """A full message with no stream events (partial streaming off)."""
+    blocks = ([TextBlock(text=text)] if text else []) + ([ToolUseBlock(id="t1", name=tool, input={})] if tool else [])
+    return AssistantMessage(content=blocks, model="test-model")
 
 
 def result(subtype: str = "success", is_error: bool = False, num_turns: int = 2, cost: float = 0.0012) -> ResultMessage:
@@ -28,13 +47,14 @@ def result(subtype: str = "success", is_error: bool = False, num_turns: int = 2,
 
 
 class FakeClient:
-    """Replays a scripted list of messages for each query."""
+    """Scripts are appended, in order, to one shared output stream."""
 
-    def __init__(self, scripts=(), *, connect_error=None, query_error=None, hang=False):
-        self.scripts = list(scripts)
+    def __init__(self, scripts=(), *, connect_error=None, query_error=None, hang=False, slow_seconds=0.0):
+        self.stream = deque(item for script in scripts for item in script)
         self.connect_error = connect_error
         self.query_error = query_error
         self.hang = hang
+        self.slow_seconds = slow_seconds  # pause between items, so a reader can stop mid-reply
         self.queries: list[str] = []
         self.connected = False
         self.disconnected = False
@@ -53,8 +73,13 @@ class FakeClient:
     async def receive_response(self):
         if self.hang:
             await asyncio.sleep(3600)
-        for message in self.scripts.pop(0):
-            yield message
+        while self.stream:
+            item = self.stream.popleft()
+            if self.slow_seconds:
+                await asyncio.sleep(self.slow_seconds)
+            yield item
+            if isinstance(item, ResultMessage):
+                return
 
     async def interrupt(self):
         self.interrupted = True

@@ -3,7 +3,7 @@ import asyncio
 from customer_support_agent.agent import fallbacks
 from customer_support_agent.agent.session import AgentSession, TextDelta
 from customer_support_agent.agent.sessions import SessionManager
-from tests.agent.fakes import FakeClient, assistant, delta, result, text
+from tests.agent.fakes import FakeClient, reply, result
 
 
 class Clock:
@@ -14,7 +14,7 @@ class Clock:
 
 
 def ok_script():
-    return [delta("Hello."), assistant(text("Hello.")), result()]
+    return [*reply("Hello."), result()]
 
 
 class Factory:
@@ -71,10 +71,20 @@ def test_max_turns_asks_to_rephrase_then_offers_a_specialist():
     assert (first, second) == (fallbacks.MAX_TURNS_FIRST, fallbacks.MAX_TURNS_REPEAT)
 
 
-def test_failures_and_empty_replies_get_spoken_lines():
-    scripts = {"err": [[result(subtype="error_during_execution", is_error=True)]], "empty": [[result()]]}
-    m = manager(Factory(scripts))
-    assert asyncio.run(ask(m, "err"))[0] == fallbacks.TECHNICAL_PROBLEM
+def test_technical_failure_asks_to_repeat_then_ends_the_call():
+    err = [result(subtype="error_during_execution", is_error=True)]
+    m = manager(Factory({"a": [err, ok_script(), err, err], "empty": [[result()]]}))
+
+    async def scenario():
+        return [await ask(m, "a") for _ in range(4)]
+
+    first, recovered, again, second_in_row = asyncio.run(scenario())
+    assert (first[0], first[1].ends_call) == (fallbacks.TECHNICAL_PROBLEM, False)  # asks them to speak
+    assert recovered[1].outcome == "ok"  # a success resets the count
+    assert again[0] == fallbacks.TECHNICAL_PROBLEM
+    assert (second_in_row[0], second_in_row[1].ends_call) == (fallbacks.TECHNICAL_GOODBYE, True)
+    assert fallbacks.END_CALL_PHRASE in second_in_row[0]
+    assert m.active_count == 0  # engine closed with the call
     assert asyncio.run(ask(m, "empty"))[0] == fallbacks.EMPTY_REPLY
 
 
@@ -84,10 +94,10 @@ def test_empty_message_never_reaches_claude():
     assert factory.created == {}
 
 
-def test_engine_start_failure_is_spoken_and_not_kept():
+def test_engine_start_failure_ends_the_call_straight_away():
     m = manager(Factory(fail=True))
     spoken, last = asyncio.run(ask(m, "a"))
-    assert (spoken, last.outcome, m.active_count) == (fallbacks.TECHNICAL_PROBLEM, "error", 0)
+    assert (spoken, last.outcome, last.ends_call, m.active_count) == (fallbacks.TECHNICAL_GOODBYE, "error", True, 0)
 
 
 def test_busy_when_too_many_calls():
@@ -98,7 +108,19 @@ def test_busy_when_too_many_calls():
         return await ask(m, "b")
 
     spoken, last = asyncio.run(scenario())
-    assert (spoken, last.outcome) == (fallbacks.BUSY, "busy")
+    assert (spoken, last.outcome, last.ends_call) == (fallbacks.BUSY_GOODBYE, "busy", True)
+
+
+def test_only_ending_lines_contain_an_end_call_phrase():
+    """Vapi hangs up on these phrases, so any other line containing one would cut the call."""
+    ending = {fallbacks.TECHNICAL_GOODBYE, fallbacks.BUSY_GOODBYE}
+    others = {fallbacks.MAX_TURNS_FIRST, fallbacks.MAX_TURNS_REPEAT, fallbacks.TECHNICAL_PROBLEM,
+              fallbacks.EMPTY_REPLY, fallbacks.REASSURANCE, *fallbacks.FILLERS}
+    assert all(fallbacks.END_CALL_PHRASE in line for line in ending)
+    for phrase in (fallbacks.END_CALL_PHRASE, "thanks for calling relaypay"):
+        assert not any(phrase.lower() in line.lower() for line in others)
+    # Vapi hangs up the moment the phrase is spoken, so it must be the last words of the goodbye.
+    assert fallbacks.GOODBYE.lower().rstrip(".").endswith("thanks for calling relaypay")
 
 
 def test_messages_for_the_same_call_wait_their_turn():

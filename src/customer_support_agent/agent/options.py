@@ -33,5 +33,11 @@ def build_options(settings: AgentSettings, system_prompt: str, conversation_id: 
         include_partial_messages=True,  # text arrives in pieces so Vapi can speak sooner
         thinking={"type": "disabled"},  # thinking adds seconds before the first word
         cwd=str(workdir),  # an empty folder, not the repo
-        env={"ANTHROPIC_API_KEY": settings.anthropic_api_key},
+        env={
+            "ANTHROPIC_API_KEY": settings.anthropic_api_key,
+            # Auto memory loads into the prompt even with setting_sources=[] (SDK hosting docs).
+            "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+            # The engine's own config and transcripts go here, not the developer's ~/.claude.
+            "CLAUDE_CONFIG_DIR": str(workdir / "claude-config"),
+        },
     )

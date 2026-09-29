@@ -33,9 +33,20 @@ _WORD = re.compile(r"[a-z0-9]+")
 _stemmer = snowballstemmer.stemmer("english")
 
 
+# Added when every word of an FAQ question heading (common words included) is in the query, i.e.
+# the caller asked that FAQ question. "What is RelayPay?" is only "relaypay" to BM25, and that word
+# is in nearly every chunk, so without this the FAQ doesn't rank (found in a real call).
+HEADING_MATCH_BONUS = 5.0
+
+
 def tokenize(text: str) -> list[str]:
     words = [w for w in _WORD.findall(text.lower()) if w not in _STOPWORDS]
     return _stemmer.stemWords(words)
+
+
+def _all_words(text: str) -> frozenset[str]:
+    """Stemmed words including common ones, for whole-heading matching."""
+    return frozenset(_stemmer.stemWords(_WORD.findall(text.lower())))
 
 
 class KnowledgeBase:
@@ -44,6 +55,10 @@ class KnowledgeBase:
             raise KnowledgeBaseError("Knowledge base has no chunks to index")
         self._chunks = tuple(chunks)
         self._index = BM25Okapi([tokenize(f"{c.heading}\n{c.text}") for c in self._chunks])
+        # Only FAQ question headings: topic headings ("International Payments") are too easy to match.
+        self._heading_words = tuple(
+            _all_words(c.heading) if c.heading.rstrip().endswith("?") else frozenset() for c in self._chunks
+        )
 
     @classmethod
     def from_file(cls, path: Path) -> "KnowledgeBase":
@@ -82,7 +97,11 @@ class KnowledgeBase:
             logger.warning("Knowledge base search skipped: query has no searchable words")
             return []
 
-        scores = self._index.get_scores(terms)
+        query_words = _all_words(query)
+        scores = [
+            float(score) + (HEADING_MATCH_BONUS if heading and heading <= query_words else 0.0)
+            for score, heading in zip(self._index.get_scores(terms), self._heading_words)
+        ]
         ranked = sorted(zip(self._chunks, scores), key=lambda pair: pair[1], reverse=True)
         results = [SearchResult(chunk=c, score=float(s)) for c, s in ranked[:top_k] if s > 0]
 
