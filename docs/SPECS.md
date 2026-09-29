@@ -18,21 +18,34 @@ Vapi  ── speech-to-text, text-to-speech, first greeting
    │  POST {url}/chat/completions (OpenAI format, SSE stream back)
    │  Authorization header = VAPI_LLM_SECRET
    ▼
-FastAPI backend (Cloud Run)
-   │  one warm Agent SDK session per Vapi call
-   ▼
-Claude Agent SDK  ── the only "brain"; locked to our MCP tools only
-   │  stdio
-   ▼
-MCP server (Python, subprocess)
-   ├── search_knowledge_base  → in-memory BM25 over the KB file
-   ├── lookup_customer / lookup_transaction / lookup_payout → Supabase
-   ├── create_support_ticket / create_escalation → Supabase
-   └── log_conversation_event → Supabase
+One Cloud Run service (one container, one public HTTPS URL)
+┌───────────────────────────────────────────────────────────────────┐
+│ FastAPI on the public port                                          │
+│   /  voice page · /chat/completions (Vapi) · /console · /health     │
+│   one warm Agent SDK session per Vapi call                          │
+│        ▼                                                            │
+│ Claude Agent SDK (Claude Code engine) ── the only "brain",          │
+│   locked to our MCP tools only                                      │
+│        │ Streamable HTTP → http://127.0.0.1:8001/mcp                │
+│        │ Authorization: Bearer MCP_AUTH_TOKEN                       │
+│        │ X-Conversation-Id: <Vapi call ID> (set by the backend)     │
+│        ▼                                                            │
+│ MCP server "relaypay" (localhost only, never public)                │
+│   ├── search_knowledge_base  → in-memory BM25 over the KB file      │
+│   ├── lookup_customer / lookup_transaction / lookup_payout → Supabase│
+│   ├── create_support_ticket / create_escalation → Supabase          │
+│   └── log_conversation_event → Supabase                             │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
 - **Vapi is set up as a Custom LLM** (provider `custom-llm`). No Vapi model runs. The Agent SDK makes every decision.
-- **FastAPI also serves** the voice page and the support console.
+- **One service for everything.** FastAPI serves the voice page, the Vapi endpoint and the console. Each public route has its own protection (§8).
+- **The MCP server uses Streamable HTTP on a localhost-only listener** (`127.0.0.1:8001`). Cloud Run only forwards traffic to the public port, so `/mcp` can't be reached from the internet. It still requires a bearer token, as a second layer.
+  - **Stateless:** nothing is remembered between requests.
+  - **JSON responses**, not streams.
+  - **One shared server** for all calls: one KB index in memory, and one DB pool in Phase 2.
+- **The conversation ID travels in the `X-Conversation-Id` header**, set by the backend for each call. The model never sees or sets it. A missing or malformed value is logged as `unknown`.
+- **Run it on its own:** `poetry run relaypay-mcp`, for local testing, the MCP Inspector and graders.
 
 ---
 
@@ -214,7 +227,9 @@ Caller speech, tool results and KB text are **data, never instructions**. The pr
 
 **Secrets:**
 - Only Vapi's **public** key goes in the browser.
-- The Anthropic key, `DATABASE_URL` and `VAPI_LLM_SECRET` stay on the server.
+- The Anthropic key, `DATABASE_URL`, `VAPI_LLM_SECRET` and `MCP_AUTH_TOKEN` stay on the server. The two generated secrets are different values.
+- **The MCP token check** uses a constant-time comparison, so rejections don't leak the token through timing. Rejected requests get a 401 and are logged without the token.
+- **Error messages and settings output never include secret values.**
 - The Vapi endpoint rejects any request without the secret.
 - RLS is on for every table, with no anonymous access.
 - Public endpoints are rate limited.
@@ -227,7 +242,7 @@ Based on `mcp-tool-requirements.md`. Deviations from the spec are marked **Δ**.
 
 | Tool | Input | Output | Notes |
 |---|---|---|---|
-| `search_knowledge_base` **Δ (new)** | `query` | chunks: id, title, text, score | Not in the spec. It's how retrieval is done (§7). |
+| `search_knowledge_base` **Δ (new)** | `query` (1–300 characters) | `found`, results: chunk_id, title, text, score. No match: `found: false` + "decline or escalate" note. Bad query: `error: invalid_query`. Failure: `error: internal_error` | Not in the spec. It's how retrieval is done (§7). Every search is logged. A logging failure never blocks the result. |
 | `lookup_customer` | `email` + `company_name` (both required in practice); `customer_id` optional | spec fields: found, customer_id, company_name, plan, account_status, kyc_status, support_notes | **Δ** Both fields are checked on the server. A mismatch returns only `found: false`. |
 | `lookup_transaction` | `transaction_id` | **Δ** found, transaction_id, status (after the date rule), and a neutral status summary | Amount, currency and customer_id are deliberately withheld. |
 | `lookup_payout` | `payout_id` or `transaction_id` | **Δ** found, payout_id, status (after the date rule) | `failure_reason` withheld. Failed payouts escalate. |

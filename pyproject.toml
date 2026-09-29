@@ -8,13 +8,18 @@ authors = [
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "rank-bm25 (>=0.2.2,<0.3.0)",
-    "snowballstemmer (>=3.1.1,<4.0.0)"
+    "snowballstemmer (>=3.1.1,<4.0.0)",
+    "mcp (>=2.2.0,<3.0.0)",
+    "claude-agent-sdk (>=0.2.161,<0.3.0)",
+    "python-dotenv (>=1.2.3,<2.0.0)",
+    "uvicorn (>=0.54.0,<0.55.0)"
 ]
 
 # Terminal commands: `name = "module.path:function"`.
 # After `poetry install`, run with `poetry run <name>` (or just `<name>` inside `poetry shell`/activated env).
 [project.scripts]
 support-agent = "customer_support_agent.main:main"
+relaypay-mcp = "customer_support_agent.mcp_server.__main__:main"
 
 [tool.poetry]
 packages = [{ include = "customer_support_agent", from = "src" }]

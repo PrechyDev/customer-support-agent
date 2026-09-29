@@ -19,11 +19,14 @@ Last updated: 29-09-2026
 
 ## Phase 1: Voice + KB latency test (the real components, KB only)
 Goal: measure latency and accuracy by voice before building the rest.
-- [ ] Add dependencies: `claude-agent-sdk`, `mcp`, `fastapi`, `uvicorn`, `python-dotenv` (done: `rank-bm25`, `snowballstemmer`, `pytest`)
+- [x] Add dependencies: `rank-bm25`, `snowballstemmer`, `pytest`, `mcp` (v2), `claude-agent-sdk`, `uvicorn`, `python-dotenv`
+- [ ] Add `fastapi` (with the backend piece)
 - [x] Copy the KB into the repo at `data/relaypay-knowledge-base.md` (the reference folder isn't deployed)
-- [ ] Check whether the Agent SDK bundles the Claude Code CLI (it isn't installed on this machine)
+- [x] Check whether the Agent SDK bundles the Claude Code CLI: **it doesn't on Windows** (`_bundled/` is empty)
+- [ ] Install the CLI locally: `npm install -g @anthropic-ai/claude-code` (and check the Linux image at deploy)
 - [x] `kb/`: load the KB, split it into 37 chunks, BM25 + stemmer index, with unit tests
-- [ ] `mcp_server/`: stdio server with `search_knowledge_base`, retrievals logged to a local file for now
+- [x] `mcp_server/`: Streamable HTTP on 127.0.0.1:8001, bearer token, `X-Conversation-Id` header, `search_knowledge_base`, retrievals logged to `logs/retrieval.jsonl`, 35 tests (incl. end-to-end over HTTP)
+- [ ] Generate `MCP_AUTH_TOKEN` and add it to `.env`
 - [ ] `agent/`: Agent SDK setup (model from env, MCP tools only, turn cap, short voice prompt with the 37 KB headings), one warm session per call
 - [ ] `api/`: `POST /chat/completions`, auth header check, SSE streaming, per-turn timing log
 - [ ] Vapi assistant set up (see Setup checklist), with ngrok running
@@ -118,6 +121,7 @@ Goal: measure latency and accuracy by voice before building the rest.
 | Vapi naming | prefix everything with my name: `precious-relaypay-llm-secret`, "Precious – RelayPay Support" | [ ] |
 | Vapi config backup | export the assistant config to `docs/vapi-assistant.json` (no secrets) so it can be recreated in minutes | [ ] |
 | Vapi org for grading | ask the instructor whether the graded assistant can live in my own Vapi account (shared credits or edits could break the live link) | [ ] |
+| MCP auth token | generate a random string → `MCP_AUTH_TOKEN` in `.env` | [ ] |
 | Vapi Custom LLM secret | generate a random string → Vapi credential + `VAPI_LLM_SECRET` in `.env` | [ ] |
 | Vapi public key + assistant ID | Vapi dashboard → `.env` (for the voice page) | [ ] |
 | Vapi private key (optional) | to pull call logs and latency | [ ] |
