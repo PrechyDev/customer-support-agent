@@ -37,6 +37,8 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [ ] Vapi: `endCallPhrases` = both phrases, voice `language: "en"` (suspect for dropped words)
 - [x] **Conversation flow (SPECS §2b):** drain interrupted turns · complete messages (drop narration) · empty reply from spoken text · waiting ladder 2 s / 8 s / 15 s · warm closing line · realistic shared-stream fake engine in tests
 - [ ] Vapi: LiveKit endpointing, `waitSeconds` 0.6, `stopSpeakingPlan.numWords` 2
+- [x] Latency fixes: sentence streaming after a tool, call-started prewarm + end-of-call close via `/vapi/events`. Filler removed after testing; one reassurance at 10 s. Prompt: one clear next step per reply
+- [ ] Vapi: voice `chunkPlan.minCharacters` 10, `server.url` = `/vapi/events` with `X-RelayPay-Secret`, `serverMessages` = status-update + end-of-call-report
 - [ ] Re-run the two failing conversations with LOG_LEVEL=DEBUG; compare "Sent to Vapi" with Vapi's transcript word by word
 - [ ] Voice test: Haiku 4.5
 - [ ] Voice test: Sonnet 5
@@ -78,8 +80,8 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [ ] Spoken fallback line on a Claude error or timeout
 - [ ] Logging after the response, errors caught
 - [ ] Log-only phrase check
-- [ ] Vapi end-of-call webhook: closes the conversation, `abandoned` if it never arrives
-- [ ] Vapi call-started webhook: start the agent session while the greeting plays (removes the cold start from the first answer)
+- [ ] Vapi end-of-call webhook: closes the agent session (done); still to do: close the *conversation record* in Supabase, `abandoned` if it never arrives
+- [x] Vapi call-started webhook: start the agent session while the greeting plays (built early, with the latency fixes)
 - [ ] Rate limiting on public endpoints
 - [ ] Attempt limits (verification, repeated sensitive requests)
 

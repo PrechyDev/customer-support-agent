@@ -13,6 +13,7 @@ Two rules from the conversation-flow design:
 
 import asyncio
 import logging
+import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 Outcome = Literal["ok", "max_turns", "error", "timeout", "busy"]
 
 DRAIN_TIMEOUT_SECONDS = 5.0  # longer than this and the session is replaced instead of reused
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
 @dataclass(frozen=True)
@@ -63,7 +65,14 @@ _DONE = object()
 
 
 class _Turn:
-    """Turns the SDK's messages for one turn into complete, speakable replies."""
+    """Turns the SDK's messages for one turn into speakable replies (SPECS §2b).
+
+    - Before any tool has been called, each message is held until it ends: if it calls a tool, its
+      text was narration and is dropped; otherwise it's sent whole.
+    - After a tool result, the model is answering, so complete sentences are sent as soon as they're
+      written (saves waiting for the whole answer). Narration between two tool calls is rare; if it
+      happens, sentences already sent can't be taken back.
+    """
 
     def __init__(self, conversation_id: str) -> None:
         self._conversation_id = conversation_id
@@ -71,48 +80,58 @@ class _Turn:
         self.tools: list[str] = []
         self.result: ResultMessage | None = None
         self._saw_stream = False  # raw stream events arrived, so they (not full messages) drive speech
-        self._buffer: list[str] = []
+        self._buffer = ""
         self._message_calls_tool = False
+        self._tool_called = False  # any tool call so far in this turn
 
-    def on_message(self, message: Any) -> str | None:
-        """Returns a complete reply to speak, or None."""
+    def on_message(self, message: Any) -> list[AgentEvent]:
         if isinstance(message, StreamEvent):
             self._saw_stream = True
             return self._on_stream_event(message.event)
         if isinstance(message, AssistantMessage):
             self.tools += [b.name for b in message.content if isinstance(b, ToolUseBlock)]
             if self._saw_stream:
-                return None  # already handled from the stream events
+                return []  # already handled from the stream events
             text = " ".join(b.text for b in message.content if isinstance(b, TextBlock)).strip()
             calls_tool = any(isinstance(b, ToolUseBlock) for b in message.content)
-            return self._finish_message(text, calls_tool)
+            return self._speak(text) if text and not calls_tool else self._drop(text)
         if isinstance(message, ResultMessage):
             self.result = message
-        return None
+        return []
 
-    def _on_stream_event(self, event: dict[str, Any]) -> str | None:
+    def _on_stream_event(self, event: dict[str, Any]) -> list[AgentEvent]:
         kind = event.get("type")
         if kind == "message_start":
-            self._buffer, self._message_calls_tool = [], False
+            self._buffer, self._message_calls_tool = "", False
         elif kind == "content_block_start" and (event.get("content_block") or {}).get("type") == "tool_use":
-            self._message_calls_tool = True
+            self._message_calls_tool = self._tool_called = True
+            dropped = self._drop(self._buffer)
+            self._buffer = ""
+            return dropped
         elif kind == "content_block_delta":
             delta = event.get("delta") or {}
-            if delta.get("type") == "text_delta" and delta.get("text"):
-                self._buffer.append(delta["text"])
+            if delta.get("type") == "text_delta" and delta.get("text") and not self._message_calls_tool:
+                self._buffer += delta["text"]
+                if self._tool_called:  # answering after a tool: send finished sentences now
+                    *done, self._buffer = _SENTENCE_END.split(self._buffer)
+                    return [event for sentence in done for event in self._speak(sentence)]
         elif kind == "message_stop":
-            return self._finish_message("".join(self._buffer).strip(), self._message_calls_tool)
-        return None
+            text, self._buffer = self._buffer, ""
+            return self._drop(text) if self._message_calls_tool else self._speak(text)
+        return []
 
-    def _finish_message(self, text: str, calls_tool: bool) -> str | None:
+    def _speak(self, text: str) -> list[AgentEvent]:
+        text = text.strip()
         if not text:
-            return None
-        if calls_tool:
-            logger.debug("Dropped narration before a tool call (conversation=%s): %r", self._conversation_id, text)
-            return None
+            return []
         piece = (" " if self.spoken else "") + text
         self.spoken.append(text)
-        return piece
+        return [TextDelta(piece)]
+
+    def _drop(self, text: str) -> list[AgentEvent]:
+        if text.strip():
+            logger.debug("Dropped narration before a tool call (conversation=%s): %r", self._conversation_id, text)
+        return []
 
 
 class AgentSession:
@@ -163,9 +182,8 @@ class AgentSession:
                     break
                 if isinstance(item, BaseException):
                     raise item
-                piece = turn.on_message(item)
-                if piece:
-                    yield TextDelta(piece)
+                for event in turn.on_message(item):
+                    yield event
             outcome, error = self._outcome(turn.result)
         except TimeoutError:
             outcome, error = "timeout", f"no reply within {self._timeout} s"

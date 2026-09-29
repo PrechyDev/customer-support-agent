@@ -87,21 +87,27 @@ Designed after the first voice tests, where early guesses by Vapi caused double 
 - One turn at a time per call (per-call lock).
 - When Vapi cancels a request (a newer one replaces it, or the caller barges in): **interrupt** the engine, then **drain** its leftover output up to the end-of-turn marker, **before** the next turn starts. If draining takes more than a few seconds, close the session; the next message starts a fresh one.
 
-**3. Speaking: complete messages (option B)**
-- Each model message is held until it ends. If it called a tool, its text was narration: **dropped** (logged at debug). Otherwise it's the answer: **sent whole**.
+**3. Speaking**
+- **Before any tool call**, each model message is held until it ends. If it called a tool, its text was narration: **dropped** (logged at debug). Otherwise it's the answer: **sent whole**.
+- **After a tool result**, the model is answering, so **complete sentences are sent as soon as they're written** (option C). Narration between two tool calls is rare; sentences already sent can't be taken back.
 - "Empty reply" is decided from what was actually spoken.
-- Trade-off: the first word comes about 0.5–1 s later than word-by-word streaming, but narration can never be spoken, and the voice gets whole sentences.
+- **Vapi voice `chunkPlan.minCharacters = 10`** (default 30). Otherwise Vapi holds back short text until more arrives (measured: 5.7 s of voice latency on a first turn, when the filler was still in use).
 
-**4. Waiting ladder (no reply text yet)**
+**4. Waiting (no reply text yet)**
 
-| Time into the turn | Caller hears |
+| When | Caller hears |
 |---|---|
-| 0–2 s | nothing (most replies arrive here) |
-| 2 s | a varied filler: "One moment, please." / "Let me check on that." / "Just a second." |
-| 8 s | "Thanks for bearing with me, I'm still on it." |
+| 0–10 s | nothing extra. Answers take about 2–5 s, and a short pause is normal on a call. **No filler**: in testing, "One moment, please" always landed right before the answer, so it sounded like a stutter. |
+| 10 s | "Thanks for bearing with me, I'm still on it." (only genuinely slow turns) |
 | 15 s | the turn times out, then the technical-failure flow (§11). Vapi's own Custom LLM timeout is 20 s, so ours fires first. |
 
-**5. Cold start (Phase 5):** start the call's agent session when Vapi reports the call has started (webhook to `assistant.server`), so the first answer doesn't pay the 0.8–1.8 s engine start.
+**4b. Ending every reply: one clear next step, and only one**
+- A reply that already asks a question (a clarification, a specialist offer) ends with that question only.
+- A full answer, when the caller seems done with the topic, ends with a short varied check ("Anything else I can help with?").
+- Mid-topic follow-ups get just the answer, with no check after every answer.
+- The caller is never left unsure whether it's their turn.
+
+**5. Cold start: built early.** Vapi's server webhook (`assistant.server.url` = `/vapi/events`, secret in `X-RelayPay-Secret`, `serverMessages` = `status-update`, `end-of-call-report` only). A `status-update` with status queued, ringing or in-progress **prewarms** the call's agent session while the greeting plays. An `end-of-call-report` (or status `ended`) **closes** it straight away. The 3-minute idle cleanup stays as the safety net.
 
 **6. Tools (Phase 3):** each tool call costs one model round trip, so the model may call several tools in one step, and logging is done by the backend, not a tool. Each tool has its own time limit (e.g. 5 s for database calls) and returns a structured error.
 

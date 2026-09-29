@@ -106,6 +106,21 @@ class SessionManager:
             return fallbacks.EMPTY_REPLY, False
         return None, False
 
+    async def prewarm(self, conversation_id: str) -> None:
+        """Starts a call's agent session before the caller's first words (Vapi's call-started event),
+        so the first answer doesn't pay the engine start. Does nothing if the call already has one or
+        the concurrency cap is reached; a failure is logged and the first message simply retries."""
+        if conversation_id in self._entries or len(self._entries) >= self._max_sessions:
+            return
+        entry = self._entries[conversation_id] = _Entry(last_used=self._clock())
+        async with entry.lock:  # the first message waits here until the engine is ready
+            try:
+                entry.session = await self._factory(conversation_id)
+                logger.info("Prewarmed agent session (conversation=%s)", conversation_id)
+            except Exception:
+                logger.exception("Prewarm failed; the first message will retry (conversation=%s)", conversation_id)
+                self._entries.pop(conversation_id, None)
+
     async def close(self, conversation_id: str) -> None:
         entry = self._entries.pop(conversation_id, None)
         if entry and entry.session:

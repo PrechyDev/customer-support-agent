@@ -1,9 +1,8 @@
-"""The public app: Vapi's Custom LLM endpoint plus a health check (SPECS §1, §11)."""
+"""The public app: Vapi's Custom LLM endpoint, Vapi's event webhook, and a health check (SPECS §1, §2b, §11)."""
 
 import asyncio
 import contextlib
 import logging
-import random
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -26,11 +25,35 @@ SECRET_HEADER = "x-relaypay-secret"
 
 class Manager(Protocol):
     def ask(self, conversation_id: str, message: str) -> AsyncIterator[AgentEvent]: ...
+    async def prewarm(self, conversation_id: str) -> None: ...
+    async def close(self, conversation_id: str) -> None: ...
     async def run_idle_reaper(self, interval_seconds: float = 30) -> None: ...
     async def close_all(self) -> None: ...
 
+# Vapi event statuses that mean a call is starting / has ended.
+_STARTING = ("queued", "ringing", "in-progress")
 
-def create_app(manager: Manager, vapi_secret: str, filler_after: float = fallbacks.FILLER_AFTER_SECONDS,
+
+def _vapi_auth(request: Request, secret: str) -> str | None:
+    """Which way the Vapi secret arrived, or None. The shared Vapi org's Custom LLM key always fills
+    Authorization, so the assistant sends ours in its own header; Authorization works on a private org."""
+    return check_vapi_secret(request.headers.get("authorization"), secret) or (
+        "custom-header" if check_vapi_secret(request.headers.get(SECRET_HEADER), secret) == "raw" else None)
+
+
+def _reject(request: Request, secret: str) -> JSONResponse:
+    other = sorted(h for h in request.headers if any(w in h for w in ("auth", "key", "token", "secret")))
+    logger.warning(
+        "Rejected Vapi request to %s: missing or invalid secret (client=%s, authorization=%s, %s=%s, "
+        "expected %d chars, other auth-like headers=%s)",
+        request.url.path, request.client.host if request.client else "unknown",
+        describe_auth_header(request.headers.get("authorization")), SECRET_HEADER,
+        describe_auth_header(request.headers.get(SECRET_HEADER)), len(secret), other,
+    )
+    return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+
+def create_app(manager: Manager, vapi_secret: str,
                reassure_after: float = fallbacks.REASSURANCE_AFTER_SECONDS) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -53,22 +76,9 @@ def create_app(manager: Manager, vapi_secret: str, filler_after: float = fallbac
         nonlocal auth_format_logged
         started = time.perf_counter()
 
-        auth_header = request.headers.get("authorization")
-        # The shared Vapi org's Custom LLM key always fills Authorization, so the assistant sends our
-        # secret in its own header (model.headers). Authorization is still accepted on its own org.
-        custom_header = request.headers.get(SECRET_HEADER)
-        auth_format = check_vapi_secret(auth_header, vapi_secret) or (
-            "custom-header" if check_vapi_secret(custom_header, vapi_secret) == "raw" else None)
+        auth_format = _vapi_auth(request, vapi_secret)
         if auth_format is None:
-            other = sorted(h for h in request.headers if any(w in h for w in ("auth", "key", "token", "secret")))
-            logger.warning(
-                "Rejected Vapi request: missing or invalid secret (client=%s, authorization=%s, %s=%s, "
-                "expected %d chars, other auth-like headers=%s)",
-                request.client.host if request.client else "unknown",
-                describe_auth_header(auth_header), SECRET_HEADER, describe_auth_header(custom_header),
-                len(vapi_secret), other,
-            )
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
+            return _reject(request, vapi_secret)
         if not auth_format_logged:  # tells us which format Vapi uses, once
             logger.info("Vapi auth header format: %s", auth_format)
             auth_format_logged = True
@@ -89,19 +99,46 @@ def create_app(manager: Manager, vapi_secret: str, filler_after: float = fallbac
         chunk_id = f"chatcmpl-{uuid.uuid4().hex}"
         events = manager.ask(call_id, parsed.message)
         if parsed.stream:
-            ladder = [(filler_after, random.choice(fallbacks.FILLERS)), (reassure_after, fallbacks.REASSURANCE)]
+            ladder = [(reassure_after, fallbacks.REASSURANCE)]
             return StreamingResponse(_stream(events, call_id, chunk_id, started, ladder), media_type="text/event-stream")
         return JSONResponse(await _collect(events, call_id, chunk_id, started))
+
+    background: set[asyncio.Task[None]] = set()  # keeps prewarm/close tasks alive until they finish
+
+    def run_in_background(coro) -> None:
+        task = asyncio.create_task(coro)
+        background.add(task)
+        task.add_done_callback(background.discard)
+
+    @app.post("/vapi/events")
+    async def vapi_events(request: Request):
+        """Vapi's server webhook (assistant.server). Only status-update and end-of-call-report are
+        subscribed. A call starting prewarms its agent session; a call ending closes it."""
+        if _vapi_auth(request, vapi_secret) is None:
+            return _reject(request, vapi_secret)
+        try:
+            message = (await request.json())["message"]
+            kind, call_id = message.get("type"), (message.get("call") or {}).get("id")
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            logger.warning("Rejected Vapi event: bad body (%s)", exc)
+            return JSONResponse({"error": "bad_request"}, status_code=400)
+
+        if call_id and kind == "status-update" and message.get("status") in _STARTING:
+            run_in_background(manager.prewarm(str(call_id)))  # answer Vapi at once; the engine starts meanwhile
+        elif call_id and (kind == "end-of-call-report" or (kind == "status-update" and message.get("status") == "ended")):
+            run_in_background(manager.close(str(call_id)))
+        logger.debug("Vapi event: type=%s status=%s call=%s", kind, message.get("status"), call_id)
+        return {"ok": True}
 
     return app
 
 
 async def _stream(events: AsyncIterator[AgentEvent], call_id: str, chunk_id: str, started: float,
                   ladder: list[tuple[float, str]]) -> AsyncIterator[str]:
-    """Streams the agent's reply, with the waiting ladder (SPECS §2b).
+    """Streams the agent's reply (SPECS §2b).
 
-    - While no reply text has arrived, each ladder line is said once at its time (a filler at 2 s,
-      a reassurance at 8 s), so a slow turn is never silence. Fast turns hear none of them.
+    - No filler: answers take 2-5 s. Only a genuinely slow turn (no reply text at 10 s) hears one
+      reassurance line. The turn itself times out at 15 s.
     - If Vapi hangs up mid-reply (barge-in), closing `events` makes the session interrupt and drain the engine.
     """
     first_text_ms: float | None = None
@@ -156,7 +193,7 @@ async def _collect(events: AsyncIterator[AgentEvent], call_id: str, chunk_id: st
         async for event in agent:
             if isinstance(event, TextDelta):
                 parts.append(event.text)
-            else:
+            elif isinstance(event, TurnResult):
                 result = event
     _log_turn(call_id, started, _ms_since(started) if parts else None, result, 0, "".join(parts))
     return completion("".join(parts), chunk_id=chunk_id, model=MODEL_NAME)

@@ -16,6 +16,8 @@ class FakeManager:
     def __init__(self):
         self.asked = []
         self.closed_all = False
+        self.prewarmed = []
+        self.closed = []
 
     async def ask(self, call_id, message):
         self.asked.append((call_id, message))
@@ -25,6 +27,12 @@ class FakeManager:
 
     async def close_idle(self):
         return []
+
+    async def prewarm(self, call_id):
+        self.prewarmed.append(call_id)
+
+    async def close(self, call_id):
+        self.closed.append(call_id)
 
     async def run_idle_reaper(self, interval_seconds=30):
         return None
@@ -54,22 +62,33 @@ def test_streams_the_agent_reply_as_sse():
     assert manager.closed_all  # sessions closed on shutdown
 
 
-def test_waiting_ladder_only_speaks_when_the_reply_is_slow():
+def test_only_a_slow_reply_hears_the_reassurance():
     class SlowManager(FakeManager):
         async def ask(self, call_id, message):
-            await asyncio.sleep(0.4)  # e.g. a slow tool call
+            await asyncio.sleep(0.3)  # e.g. a slow tool call
             async for event in super().ask(call_id, message):
                 yield event
 
     auth = {"Authorization": f"Bearer {SECRET}"}
-    with TestClient(create_app(SlowManager(), vapi_secret=SECRET, filler_after=0.05, reassure_after=0.2)) as c:
+    with TestClient(create_app(SlowManager(), vapi_secret=SECRET, reassure_after=0.1)) as c:
         slow = contents(c.post("/chat/completions", json=BODY, headers=auth).text)
-    with TestClient(create_app(FakeManager(), vapi_secret=SECRET, filler_after=0.5, reassure_after=1.0)) as c:
+    with TestClient(create_app(FakeManager(), vapi_secret=SECRET, reassure_after=1.0)) as c:
         fast = contents(c.post("/chat/completions", json=BODY, headers=auth).text)
+    assert slow == f"{fallbacks.REASSURANCE} Fees depend on the corridor."
+    assert fast == "Fees depend on the corridor."  # no filler on normal turns
 
-    filler = next(f for f in fallbacks.FILLERS if slow.startswith(f))  # one of the varied fillers
-    assert slow == f"{filler} {fallbacks.REASSURANCE} Fees depend on the corridor."
-    assert fast == "Fees depend on the corridor."
+
+def test_vapi_events_prewarm_on_call_start_and_close_on_call_end():
+    manager = FakeManager()
+    auth = {"X-RelayPay-Secret": SECRET}
+    started = {"message": {"type": "status-update", "status": "in-progress", "call": {"id": "call-9"}}}
+    ended = {"message": {"type": "end-of-call-report", "call": {"id": "call-9"}}}
+    with client(manager) as c:
+        assert c.post("/vapi/events", json=started).status_code == 401  # no secret
+        assert c.post("/vapi/events", json={"nope": 1}, headers=auth).status_code == 400
+        assert c.post("/vapi/events", json=started, headers=auth).json() == {"ok": True}
+        assert c.post("/vapi/events", json=ended, headers=auth).json() == {"ok": True}
+    assert manager.prewarmed == ["call-9"] and manager.closed == ["call-9"]
 
 
 def test_non_streaming_request_gets_one_json_reply():

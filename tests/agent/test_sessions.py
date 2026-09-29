@@ -115,7 +115,7 @@ def test_only_ending_lines_contain_an_end_call_phrase():
     """Vapi hangs up on these phrases, so any other line containing one would cut the call."""
     ending = {fallbacks.TECHNICAL_GOODBYE, fallbacks.BUSY_GOODBYE}
     others = {fallbacks.MAX_TURNS_FIRST, fallbacks.MAX_TURNS_REPEAT, fallbacks.TECHNICAL_PROBLEM,
-              fallbacks.EMPTY_REPLY, fallbacks.REASSURANCE, *fallbacks.FILLERS}
+              fallbacks.EMPTY_REPLY, fallbacks.REASSURANCE}
     assert all(fallbacks.END_CALL_PHRASE in line for line in ending)
     for phrase in (fallbacks.END_CALL_PHRASE, "thanks for calling relaypay"):
         assert not any(phrase.lower() in line.lower() for line in others)
@@ -151,3 +151,20 @@ def test_idle_sessions_are_closed_and_close_all_cleans_up():
     assert asyncio.run(scenario()) == ["a"]
     assert all(c.disconnected for c in factory.created.values())
     assert m.active_count == 0
+
+
+def test_prewarm_starts_the_engine_before_the_first_words_and_respects_the_cap():
+    factory = Factory()
+    m = manager(factory, max_sessions=1)
+
+    async def scenario():
+        await m.prewarm("a")  # Vapi says the call started
+        started_before_speaking = "a" in factory.created
+        await ask(m, "a", "hi")  # first words reuse the warm session
+        await m.prewarm("a")  # repeated event: no second engine
+        await m.prewarm("b")  # over the cap: ignored
+        return started_before_speaking
+
+    assert asyncio.run(scenario()) is True
+    assert factory.created["a"].queries == ["hi"]
+    assert "b" not in factory.created

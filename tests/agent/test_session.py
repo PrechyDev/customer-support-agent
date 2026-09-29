@@ -26,6 +26,14 @@ def test_narration_before_a_tool_is_dropped_and_the_answer_sent_whole():
         "ok", "Fees depend on the corridor.", (KB_TOOL,), 2, 0.0031)
 
 
+def test_after_a_tool_the_answer_streams_sentence_by_sentence():
+    answer = "Fees depend on the corridor. You'll see the exact fee before you confirm."
+    client = FakeClient([[*reply("Let me search.", tool=KB_TOOL), *reply(answer, pieces=8), result()]])
+    events = collect(AgentSession(client, "call-1", turn_timeout_seconds=5))
+    texts = [e.text for e in events if isinstance(e, TextDelta)]
+    assert texts == ["Fees depend on the corridor.", " You'll see the exact fee before you confirm."]  # 2 sentences
+
+
 def test_without_stream_events_full_messages_are_used_the_same_way():
     client = FakeClient([[assistant_only("Let me check.", tool=KB_TOOL), assistant_only("Hello, how can I help?"), result()]])
     assert spoken(collect(AgentSession(client, "call-1", turn_timeout_seconds=5))) == "Hello, how can I help?"
