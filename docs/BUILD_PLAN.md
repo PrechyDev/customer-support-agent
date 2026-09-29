@@ -51,13 +51,13 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [ ] `lookup_transaction` (status only, date rule, ID normalisation)
 - [ ] `lookup_payout` (by payout or transaction ID, status only)
 - [ ] `create_support_ticket` (idempotent, speakable ID)
-- [ ] `create_escalation` (idempotent, linked ticket, call_booked rule)
+- [ ] `create_escalation` (idempotent, linked ticket, call_booked rule, callback window Mon–Fri 08:00–18:00 UTC checked on the server)
 - [ ] `log_conversation_event`
 - [ ] Every tool writes to `tool_calls` and handles Supabase failures
 - [ ] Unit tests per tool (missing records, mismatches, duplicates, DB down)
 
 ## Phase 4: Agent
-- [ ] Full system prompt: response paths, verification flow, what can be said, escalation triggers, behaviour sections of the KB
+- [ ] Full system prompt: response paths, verification flow, what can be said, escalation triggers, behaviour sections of the KB, callback hours + time zone confirmation, current UTC date/time
 - [ ] Verification state stored on the conversation record
 - [ ] Retrieval results written to `retrieval_logs`
 - [ ] Turns written to `conversation_turns` (answer type, confidence note, timings)
