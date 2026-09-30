@@ -18,6 +18,7 @@ def test_reads_latest_user_message_and_call_id():
     }
     parsed = parse_request(body)
     assert (parsed.call_id, parsed.message, parsed.stream) == ("call-123", "what fees do you charge?", True)
+    assert parsed.last_assistant == "reply"  # the agent's previous reply, as Vapi recorded it
 
 
 def test_bad_requests_raise_clear_errors():

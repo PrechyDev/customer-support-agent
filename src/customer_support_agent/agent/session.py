@@ -6,6 +6,9 @@ becomes a TurnResult with an outcome the SessionManager turns into a spoken line
 Three rules from the conversation-flow design:
 - Only words inside <say>...</say> are spoken. Anything else the model writes (reasoning, notes) is
   dropped, so its thinking can never reach the caller (Haiku reasoned out loud in a real call).
+- The model never ends a call itself. It writes <end_call/> and the backend says the fixed goodbye.
+  Vapi hangs up on "goodbye", so any hang-up phrase the model writes is rewritten (Haiku once greeted
+  a caller with an earlier trigger phrase, and Vapi hung up mid-call).
 - Complete messages: each model message is held until it ends. If it called a tool, its text was
   narration ("Let me search...") and is dropped; otherwise it's the answer and is sent whole.
 - Clean cancellation: if a turn is abandoned (Vapi cancelled the request, or it timed out), the
@@ -31,6 +34,16 @@ Outcome = Literal["ok", "max_turns", "error", "timeout", "busy"]
 DRAIN_TIMEOUT_SECONDS = 5.0  # longer than this and the session is replaced instead of reused
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 _SAY = re.compile(r"<say>(.*?)(?:</say>|$)", re.DOTALL)
+_END_CALL = "<end_call"
+# The word Vapi hangs up on (fallbacks.END_CALL_PHRASE / endCallPhrases). The model's own words must
+# never contain it: only the backend's fixed ending lines do.
+_HANGUP_PHRASES = ((re.compile(r"\bgood-?bye\b", re.IGNORECASE), "bye for now"),)
+
+
+def without_hangup_phrases(text: str) -> str:
+    for pattern, replacement in _HANGUP_PHRASES:
+        text = pattern.sub(replacement, text)
+    return text.strip()
 
 
 def say_text(raw: str, final: bool) -> str:
@@ -59,6 +72,7 @@ class TurnResult:
     cost_usd: float | None = None
     duration_ms: float = 0.0
     error: str | None = None
+    end_requested: bool = False  # the model wrote <end_call/>: the caller is done
     fallback: str | None = None  # the fixed line spoken instead of / after the model's text
     ends_call: bool = False  # the fallback line contains the end-call phrase, so Vapi hangs up
 
@@ -99,6 +113,7 @@ class _Turn:
         self._sent = 0  # characters of this message's <say> text already spoken
         self._message_calls_tool = False
         self._tool_called = False  # any tool call so far in this turn
+        self.end_requested = False
 
     def on_message(self, message: Any) -> list[AgentEvent]:
         if isinstance(message, StreamEvent):
@@ -137,8 +152,10 @@ class _Turn:
         return []
 
     def _finish(self) -> list[AgentEvent]:
+        if _END_CALL in self._raw:
+            self.end_requested = True
         spoken = say_text(self._raw, final=True)
-        if self._raw.strip() and not spoken:
+        if self._raw.strip() and not spoken and not self.end_requested:
             logger.warning("Model reply had no <say> text; nothing spoken (conversation=%s)", self._conversation_id)
         outside = _SAY.sub("", self._raw).strip()
         if outside:
@@ -148,7 +165,11 @@ class _Turn:
         return events
 
     def _speak(self, text: str) -> list[AgentEvent]:
-        text = text.strip()
+        safe = without_hangup_phrases(text)
+        if safe != text.strip():
+            logger.warning("Rewrote a hang-up phrase in the model's reply (conversation=%s): %r",
+                           self._conversation_id, text)
+        text = safe
         if not text:
             return []
         piece = (" " if self.spoken else "") + text
@@ -234,6 +255,7 @@ class AgentSession:
             cost_usd=turn.result.total_cost_usd if turn.result else None,
             duration_ms=round((time.perf_counter() - started) * 1000, 1),
             error=error,
+            end_requested=turn.end_requested,
         )
         logger.info(
             "Agent turn (conversation=%s outcome=%s turns=%d tools=%s cost_usd=%s duration_ms=%.0f)",

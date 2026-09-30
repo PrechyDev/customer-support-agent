@@ -14,9 +14,10 @@ Last updated: 29-09-2026
 State: voice calls work end to end on Haiku 4.5 (grounded, clean turn-taking, warm goodbye, prewarm, webhook close). Latest fixes (`<say>` tags, prewarm wait limit, "never claim an action") are built and tested but **not yet voice-tested**.
 
 1. [ ] **Voice-test the latest fixes on Haiku:** both test conversations (new customer; customer with problems). Check: no spoken reasoning, no "I've flagged this", grounded answers, one clear next step per reply, the goodbye ends the call, `Prewarmed agent session` during the greeting.
-2. [ ] **Add `LOG_FILE=logs/backend.log`** (backend also writes its log to a gitignored file) so Claude reads the logs directly instead of copy-paste.
+2. [x] **Add `LOG_FILE=logs/backend.log`** (backend also writes its log to a gitignored file) so Claude reads the logs directly instead of copy-paste.
 3. [ ] **Check the garbled words** seen in the Sonnet run ("A special. Will need…", "Delays. Specific. ally…"): compare `Sent to Vapi` with Vapi's transcript. Our text or Vapi's voice?
 4. [ ] **Confirm the model decision** (provisionally Haiku 4.5, see `submission/LATENCY_RESULTS.md`), then set it in `.env.example` and the reflections notes.
+4b. [x] **"Hold on" / "wait" rule:** when the caller says it, Bex briefly acknowledges and waits, instead of restarting the answer. Plus the "what the caller actually heard" fix (use Vapi's truncated last assistant message).
 5. [ ] Vapi silence hooks (60 s / 120 s) still to add; save the final assistant settings as `docs/vapi-assistant.json` (no secrets).
 6. [ ] **Phase 2: Supabase**: schema + seed data (5 customers, 5 transactions, 3 payouts) + runtime tables.
 7. [ ] **Phase 3: MCP tools**: lookup_customer, lookup_transaction, lookup_payout, create_support_ticket, create_escalation, log_conversation_event (rules in SPECS §3–§6, §9).
@@ -43,15 +44,14 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [x] `agent/`: prompt (37 headings, KB policy sections, date), locked-down SDK options, one session per call with per-call lock, 30 s turn timeout, fallback lines, idle cleanup (180 s), 10-call cap, tests with a fake client (suite trimmed to 50 lean tests)
 - [x] `api/`: `POST /chat/completions` (Vapi secret, OpenAI SSE streaming, non-stream fallback, barge-in interrupts the engine, per-turn latency log), `/health`, one start command `poetry run relaypay-backend` (MCP first, then public app)
 - [ ] Vapi assistant set up (see Setup checklist), with ngrok running
-- [ ] Vapi `endCallPhrases: ["This call will now end"]` on the assistant (ends the call after the technical/busy goodbye lines)
+- [ ] Vapi `endCallPhrases: ["goodbye"]` (one word, can't be split) and voice `chunkPlan.minCharacters` back to 30
 - [ ] Vapi silence hooks: 60 s "are you still there" message, 120 s goodbye + endCall, reset on caller speech (save in `docs/vapi-assistant.json`)
 - [x] First voice calls (Haiku 4.5): calls work end to end. Found: invented details, unusable questions (loops), answering before searching, spoken reasoning, no goodbye, pointless filler, dropped words
 - [x] Fixes: grounding prompt rewrite, FAQ question match in search, goodbye phrase, backend filler after 2 s, debug log of the exact text sent to Vapi
-- [ ] Vapi: `endCallPhrases` = both phrases, voice `language: "en"` (suspect for dropped words)
 - [x] **Conversation flow (SPECS §2b):** drain interrupted turns · complete messages (drop narration) · empty reply from spoken text · waiting ladder 2 s / 8 s / 15 s · warm closing line · realistic shared-stream fake engine in tests
 - [ ] Vapi: LiveKit endpointing, `waitSeconds` 0.6, `stopSpeakingPlan.numWords` 2
 - [x] Latency fixes: sentence streaming after a tool, call-started prewarm + end-of-call close via `/vapi/events`. Filler removed after testing; one reassurance at 10 s. Prompt: one clear next step per reply
-- [ ] Vapi: voice `chunkPlan.minCharacters` 10, `server.url` = `/vapi/events` with `X-RelayPay-Secret`, `serverMessages` = status-update + end-of-call-report
+- [ ] Vapi: `server.url` = `/vapi/events` with `X-RelayPay-Secret`, `serverMessages` = status-update + end-of-call-report
 - [ ] Re-run the two failing conversations with LOG_LEVEL=DEBUG; compare "Sent to Vapi" with Vapi's transcript word by word
 - [ ] Voice test: Haiku 4.5
 - [ ] Voice test: Sonnet 5

@@ -4,14 +4,14 @@ Kept in one place so they're easy to review. All are short, promise nothing and 
 Every line either asks the caller to do something now, or ends the call, so nobody is left in silence.
 """
 
-# Vapi's assistant has both phrases in `endCallPhrases`: when the assistant says one, Vapi hangs up.
-# END_CALL_PHRASE ends a call after a failure; GOODBYE is the normal end, said by the agent when the
-# caller is done (the prompt tells it the exact words). Neither may appear in any other line.
-END_CALL_PHRASE = "This call will now end."
-# Warm and complete, with the trigger phrase as the LAST words: Vapi hangs up as soon as it's spoken.
+# Vapi's assistant has endCallPhrases = ["goodbye"]: when the assistant says it, Vapi hangs up.
+# One word, because Vapi splits text into pieces and a longer phrase can be split mid-way and not match.
+# Every line that should end the call ends with it; no other line may contain it.
+END_CALL_PHRASE = "Goodbye."
+# Said by the backend (which has no context of how the call went), so no "glad I could help".
 GOODBYE = (
-    "You're welcome, I'm glad I could help. If anything else comes up, you can reach us any time "
-    "through your RelayPay dashboard. Have a great day, and thanks for calling RelayPay."
+    "If anything else comes up, you can reach us any time through your RelayPay dashboard. "
+    f"Have a great day, and thanks for calling RelayPay. {END_CALL_PHRASE}"
 )
 
 # Waiting (SPECS §2b): no filler. Answers take 2-5 s, and a filler landed right before the answer

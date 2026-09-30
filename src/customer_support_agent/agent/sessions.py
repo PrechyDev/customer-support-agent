@@ -111,6 +111,8 @@ class SessionManager:
                 return fallbacks.TECHNICAL_GOODBYE, True
             return fallbacks.TECHNICAL_PROBLEM, False
         entry.technical_failures_in_row = 0  # any other outcome breaks the run of failures
+        if result.outcome == "ok" and result.end_requested:
+            return fallbacks.GOODBYE, True  # the backend, not the model, says the hang-up phrase
         if result.outcome == "max_turns":
             entry.max_turn_hits += 1
             return (fallbacks.MAX_TURNS_FIRST if entry.max_turn_hits == 1 else fallbacks.MAX_TURNS_REPEAT), False

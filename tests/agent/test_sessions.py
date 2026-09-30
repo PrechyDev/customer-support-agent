@@ -111,16 +111,14 @@ def test_busy_when_too_many_calls():
     assert (spoken, last.outcome, last.ends_call) == (fallbacks.BUSY_GOODBYE, "busy", True)
 
 
-def test_only_ending_lines_contain_an_end_call_phrase():
-    """Vapi hangs up on these phrases, so any other line containing one would cut the call."""
-    ending = {fallbacks.TECHNICAL_GOODBYE, fallbacks.BUSY_GOODBYE}
+def test_only_ending_lines_contain_the_hang_up_word():
+    """Vapi hangs up on "goodbye", so any other line containing it would cut the call."""
+    ending = {fallbacks.GOODBYE, fallbacks.TECHNICAL_GOODBYE, fallbacks.BUSY_GOODBYE}
     others = {fallbacks.MAX_TURNS_FIRST, fallbacks.MAX_TURNS_REPEAT, fallbacks.TECHNICAL_PROBLEM,
               fallbacks.EMPTY_REPLY, fallbacks.REASSURANCE}
-    assert all(fallbacks.END_CALL_PHRASE in line for line in ending)
-    for phrase in (fallbacks.END_CALL_PHRASE, "thanks for calling relaypay"):
-        assert not any(phrase.lower() in line.lower() for line in others)
-    # Vapi hangs up the moment the phrase is spoken, so it must be the last words of the goodbye.
-    assert fallbacks.GOODBYE.lower().rstrip(".").endswith("thanks for calling relaypay")
+    assert all(line.endswith(fallbacks.END_CALL_PHRASE) for line in ending)  # the last word, so it's spoken
+    assert not any("goodbye" in line.lower() for line in others)
+    assert "glad i could help" not in fallbacks.GOODBYE.lower()  # the backend has no context of the call
 
 
 def test_messages_for_the_same_call_wait_their_turn():
@@ -182,3 +180,10 @@ def test_a_hung_prewarm_never_leaves_the_caller_in_silence():
 
     spoken, last = asyncio.run(scenario())
     assert (spoken, last.outcome) == (fallbacks.TECHNICAL_PROBLEM, "timeout")
+
+
+def test_end_call_signal_makes_the_backend_say_the_goodbye_and_hang_up():
+    m = manager(Factory({"a": [[*reply("<end_call/>", say=False), result()]]}))
+    spoken, last = asyncio.run(ask(m, "a", "no, that's all"))
+    assert (spoken, last.ends_call) == (fallbacks.GOODBYE, True)
+    assert m.active_count == 0  # engine closed with the call

@@ -43,7 +43,7 @@ def main() -> int:
     except ConfigError as exc:
         logger.error("Backend not started: %s", exc)
         return EXIT_CONFIG_ERROR
-    configure_logging(mcp_settings.log_level)
+    configure_logging(mcp_settings.log_level, mcp_settings.log_file)
 
     try:
         kb = KnowledgeBase.from_file(mcp_settings.kb_path)

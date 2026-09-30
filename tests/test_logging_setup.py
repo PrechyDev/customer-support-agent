@@ -11,3 +11,11 @@ def test_repeat_calls_keep_one_handler_and_preserve_others(caplog):
     assert len(root.handlers) == count and root.level == logging.DEBUG
     logging.getLogger("x").warning("still captured")  # pytest's handler survived
     assert "still captured" in caplog.text
+
+
+def test_log_file_gets_a_copy_of_the_log(tmp_path):
+    log_file = tmp_path / "logs" / "backend.log"  # folder doesn't exist yet
+    configure_logging("INFO", log_file)
+    logging.getLogger("x").info("written to the file too")
+    configure_logging("INFO")  # closes the file handler
+    assert "written to the file too" in log_file.read_text(encoding="utf-8")

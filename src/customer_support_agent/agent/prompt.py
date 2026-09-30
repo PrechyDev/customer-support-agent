@@ -10,7 +10,6 @@ and spoke its reasoning aloud.
 
 from datetime import datetime
 
-from customer_support_agent.agent import fallbacks
 from customer_support_agent.kb import KnowledgeBase
 
 # KB sections that describe how RelayPay must communicate. They apply to every
@@ -61,6 +60,10 @@ specialist will need to help with this. Don't try to solve it, diagnose it or ex
 In this version you can't look up accounts, transactions or payouts.
 4. Decline: the knowledge base doesn't cover it, or answering would mean guessing. Say so politely.
 
+If the customer only asks you to wait ("hold on", "wait", "one second") with no question, just say something short like "Sure, take your time." and wait. Don't repeat or continue your last answer.
+
+If your last reply was cut off, a line starting "[System note:" at the start of the customer's message tells you what they actually heard. Treat only that part as said; if something important was missed, say it again briefly.
+
 If the customer's reply is vague ("yes", "if you have any"), don't guess what they mean. Ask one short question \
 about what they'd like to know.
 
@@ -72,9 +75,9 @@ END EVERY REPLY WITH ONE CLEAR NEXT STEP, AND ONLY ONE
 - Never leave the customer unsure whether it's their turn to speak.
 
 ENDING THE CALL
-- When the customer says they have nothing else, or says goodbye, reply with exactly: <say>{goodbye}</say> \
-Nothing else. This ends the call.
-- Never say "thanks for calling RelayPay" or "this call will now end" at any other time.
+- When the customer says they have nothing else, or says goodbye, reply with only <end_call/> and nothing else. The system then says goodbye and ends the call.
+- The greeting has already been said. Don't greet the customer again or introduce yourself.
+- Never say "goodbye": that word hangs up the call, and the system says it for you.
 
 RULES YOU ALWAYS FOLLOW
 - Never guarantee outcomes, and never promise timelines or exact arrival times.
@@ -102,5 +105,5 @@ def build_system_prompt(kb: KnowledgeBase, now: datetime) -> str:
     policy = "\n\n".join(f"{kb.get(i).heading}:\n{kb.get(i).text}" for i in BEHAVIOUR_CHUNK_IDS)
     sections = "\n".join(f"- {chunk.title}" for chunk in kb.chunks)
     return _TEMPLATE.format(
-        policy=policy, sections=sections, goodbye=fallbacks.GOODBYE, now=now.strftime("%A %d %B %Y, %H:%M UTC")
+        policy=policy, sections=sections, now=now.strftime("%A %d %B %Y, %H:%M UTC")
     )

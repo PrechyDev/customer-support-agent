@@ -92,7 +92,7 @@ Designed after the first voice tests, where early guesses by Vapi caused double 
 - **Before any tool call**, each model message is held until it ends. If it called a tool, its text was narration: **dropped** (logged at debug). Otherwise it's the answer: **sent whole**.
 - **After a tool result**, the model is answering, so **complete sentences are sent as soon as they're written** (option C). Narration between two tool calls is rare; sentences already sent can't be taken back.
 - "Empty reply" is decided from what was actually spoken.
-- **Vapi voice `chunkPlan.minCharacters = 10`** (default 30). Otherwise Vapi holds back short text until more arrives (measured: 5.7 s of voice latency on a first turn, when the filler was still in use).
+- **Vapi voice `chunkPlan.minCharacters`: back to the default 30.** It was lowered to 10 so the short filler would be spoken promptly (measured: 5.7 s of voice latency with the filler held back). Once the filler was removed that reason went away, and at 10 Vapi split text mid-phrase ("thanks for calling. RelayPay"), which stopped the hang-up phrase matching.
 
 **4. Waiting (no reply text yet)**
 
@@ -101,6 +101,10 @@ Designed after the first voice tests, where early guesses by Vapi caused double 
 | 0–10 s | nothing extra. Answers take about 2–5 s, and a short pause is normal on a call. **No filler**: in testing, "One moment, please" always landed right before the answer, so it sounded like a stutter. |
 | 10 s | "Thanks for bearing with me, I'm still on it." (only genuinely slow turns) |
 | 15 s | the turn times out, then the technical-failure flow (§11). Vapi's own Custom LLM timeout is 20 s, so ours fires first. |
+
+**4a. Interruptions**
+- "Hold on", "wait" or "one second" with no question: Bex says something short ("Sure, take your time.") and waits. It doesn't repeat or continue its answer.
+- **What the caller actually heard:** Vapi records the assistant's last message cut off where the caller interrupted (marked "●"). If that's clearly shorter than what we sent, the backend starts the caller's next message with `[System note: your last reply was cut off. The customer only heard: "…"]`, so the agent treats only that part as said. Smaller differences (Vapi's punctuation) are ignored.
 
 **4b. Ending every reply: one clear next step, and only one**
 - A reply that already asks a question (a clarification, a specialist offer) ends with that question only.
@@ -112,7 +116,9 @@ Designed after the first voice tests, where early guesses by Vapi caused double 
 
 **6. Tools (Phase 3):** each tool call costs one model round trip, so the model may call several tools in one step, and logging is done by the backend, not a tool. Each tool has its own time limit (e.g. 5 s for database calls) and returns a structured error.
 
-**7. Ending:** Vapi hangs up as soon as it finishes speaking a trigger phrase, and has no delay setting, so the closing line itself is warm and complete, with the trigger phrase **as the last words**: "You're welcome, I'm glad I could help. If anything else comes up, you can reach us any time through your RelayPay dashboard. Have a great day, and thanks for calling RelayPay."
+**7. Ending: the backend ends calls, never the model.** When the caller is done, the model writes only `<end_call/>`. The **backend** then says the fixed goodbye, which has no "glad I could help" (the backend doesn't know how the call went): "If anything else comes up, you can reach us any time through your RelayPay dashboard. Have a great day, and thanks for calling RelayPay. Goodbye." **Vapi hangs up on one word: `endCallPhrases = ["goodbye"]`.** One word can't be split the way Vapi splits text into pieces; the earlier multi-word phrase was split mid-way and didn't match. Every ending line (goodbye, technical goodbye, busy) ends with "Goodbye." as its last word.
+- **Guard:** the model's own words can never contain a hang-up phrase. "Goodbye" is rewritten to "bye for now", with a warning logged. (Haiku greeted a caller with an earlier trigger phrase, and Vapi hung up mid-call.)
+- The prompt also says the greeting has already been said: don't greet again.
 
 ---
 
@@ -343,12 +349,12 @@ Based on `mcp-tool-requirements.md`. Deviations from the spec are marked **Δ**.
 | Agent hits its turn limit (`AGENT_MAX_TURNS=6` per caller message; the SDK reports `error_max_turns`) | The call continues. The first time in a call, the caller hears "Sorry, I didn't manage to finish that. Could you say it another way?" The second time, the agent offers a specialist and escalates. Both are logged. |
 | Caller goes silent | **Set up in Vapi** (hooks on `customer.speech.timeout`, reset when the caller speaks). At 60 s: "I haven't heard from you in a minute. Would you like to continue, or shall I end the call?" At 120 s: "I'll end the call now. Thanks for contacting RelayPay." and then `endCall`. |
 | Agent session left open | The backend closes a call's session when the call ends (end-of-call report), or after **3 idle minutes** as a safety net. That's longer than Vapi's 2, so a late reply never hits a closed session. |
-| Too many calls at once (more than `AGENT_MAX_SESSIONS`, default 10) | "Sorry, we're very busy right now. Please call back in a few minutes. This call will now end." Vapi hangs up. |
+| Too many calls at once (more than `AGENT_MAX_SESSIONS`, default 10) | "Sorry, we're very busy right now. Please call back in a few minutes. Goodbye." Vapi hangs up. |
 | Caller talks over the agent (barge-in): Vapi drops the request mid-reply | The agent interrupts the engine straight away, so the caller's next message doesn't wait for a reply nobody will hear. Logged as a cancelled turn. |
-| Claude API error or timeout (a turn fails) | **1st failure:** "Sorry, I had a technical problem. Could you say that again?" (a question, so the caller knows to speak). **2nd failure in a row:** "I'm sorry, I'm having technical problems and can't help right now. Please try again later, or reach our support team through your RelayPay dashboard. This call will now end." Vapi hangs up and the session is closed. A successful turn resets the count. No escalation. |
+| Claude API error or timeout (a turn fails) | **1st failure:** "Sorry, I had a technical problem. Could you say that again?" (a question, so the caller knows to speak). **2nd failure in a row:** "I'm sorry, I'm having technical problems and can't help right now. Please try again later, or reach our support team through your RelayPay dashboard. Goodbye." Vapi hangs up and the session is closed. A successful turn resets the count. No escalation. |
 | The agent engine can't start (retrying within the call can't fix it) | The same closing line straight away, and Vapi hangs up. |
-| **How calls are ended** | The closing lines end with **"This call will now end."**, set in the Vapi assistant's `endCallPhrases`. Vapi hangs up when the assistant says it. Only the closing lines contain it (a test checks this), and the prompt tells the agent never to say it. |
-| Caller is done ("no, that's all", "bye") | The agent says the warm closing line from §2b, ending with "thanks for calling RelayPay", which is also in Vapi's `endCallPhrases`, so Vapi hangs up. The prompt forbids that phrase at any other time, and a test checks no fallback line contains it. |
+| **How calls are ended** | Every closing line ends with **"Goodbye."**; Vapi's `endCallPhrases` is just `goodbye`, and Vapi hangs up when the assistant says it. Only the backend's fixed lines contain it: the model's words are rewritten (§2b point 7), and a test checks no other fixed line contains it. |
+| Caller is done ("no, that's all", "bye") | The model writes `<end_call/>`; the **backend** says the closing line from §2b, ending with "Goodbye.", and Vapi hangs up. |
 | A reply is slow | The **backend** (not the model) follows the waiting ladder in §2b: a varied filler at 2 s, a reassurance at 8 s, a timeout at 15 s. Fast replies never hear it. The model is told never to narrate ("let me search…"), because the search itself takes about 0.2 ms, so a narrated filler was always followed by an instant answer. |
 | Logging fails | Never blocks or breaks the reply. Logs are written after the response, with errors caught. |
 | Call drops | The conversation is closed when Vapi's end-of-call report arrives, and marked `abandoned` if it never does. |

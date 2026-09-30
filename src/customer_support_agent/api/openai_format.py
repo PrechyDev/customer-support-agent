@@ -15,6 +15,7 @@ class ParsedRequest:
     call_id: str | None
     message: str  # the caller's newest words; earlier turns live in the agent session
     stream: bool
+    last_assistant: str | None = None  # the agent's previous reply as Vapi recorded it (cut off if interrupted)
 
 
 def _text(content: Any) -> str:
@@ -33,10 +34,13 @@ def parse_request(body: Any) -> ParsedRequest:
         raise RequestError("no user message in the request")
     call = body.get("call")
     call_id = call.get("id") if isinstance(call, dict) else None
+    last_user = max(i for i, m in enumerate(body["messages"]) if isinstance(m, dict) and m.get("role") == "user")
+    earlier_assistant = [m for m in body["messages"][:last_user] if isinstance(m, dict) and m.get("role") == "assistant"]
     return ParsedRequest(
         call_id=str(call_id) if call_id else None,
         message=_text(user_messages[-1].get("content")),
         stream=bool(body.get("stream", False)),
+        last_assistant=_text(earlier_assistant[-1].get("content")) if earlier_assistant else None,
     )
 
 

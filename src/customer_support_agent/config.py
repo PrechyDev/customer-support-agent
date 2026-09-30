@@ -25,6 +25,7 @@ class Settings:
     mcp_port: int
     mcp_auth_token: str
     log_level: str
+    log_file: Path | None = None  # optional copy of the log, for local testing
 
     def __repr__(self) -> str:  # keep the token out of logs and tracebacks
         return (

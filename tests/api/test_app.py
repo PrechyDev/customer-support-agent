@@ -91,6 +91,26 @@ def test_vapi_events_prewarm_on_call_start_and_close_on_call_end():
     assert manager.prewarmed == ["call-9"] and manager.closed == ["call-9"]
 
 
+def test_agent_is_told_what_the_caller_heard_when_cut_off():
+    manager = FakeManager()
+    auth = {"Authorization": f"Bearer {SECRET}"}
+
+    def turn(previous_reply_as_heard):
+        messages = [{"role": "user", "content": "what fees?"}]
+        if previous_reply_as_heard is not None:
+            messages += [{"role": "assistant", "content": previous_reply_as_heard}, {"role": "user", "content": "go on"}]
+        c.post("/chat/completions", json={**BODY, "messages": messages}, headers=auth)
+
+    with client(manager) as c:
+        turn(None)  # we send "Fees depend on the corridor."
+        turn("Fees depend●")  # the caller cut in after two words
+        turn("Fees depend on the corridor.")  # this time they heard it all
+    first, cut_off, complete = (message for _, message in manager.asked)
+    assert first == "what fees?"
+    assert cut_off == '[System note: your last reply was cut off. The customer only heard: "Fees depend"]\ngo on'
+    assert complete == "go on"
+
+
 def test_non_streaming_request_gets_one_json_reply():
     with client(FakeManager()) as c:
         response = c.post("/chat/completions", json={**BODY, "stream": False}, headers={"Authorization": SECRET})

@@ -11,7 +11,7 @@ For the next Claude Code session. Read this, then `docs/BUILD_PLAN.md` ("▶ Nex
 
 ## How to run a test call
 
-1. `.env` at the repo root (never read it; `.env.example` lists the names). Key values: `AGENT_MODEL=claude-haiku-4-5-20251001`, `LOG_LEVEL=DEBUG` for testing, `AGENT_TURN_TIMEOUT_SECONDS=15`.
+1. `.env` at the repo root (never read it; `.env.example` lists the names). Key values: `AGENT_MODEL=claude-haiku-4-5-20251001`, `LOG_LEVEL=DEBUG` for testing, `AGENT_TURN_TIMEOUT_SECONDS=15`, `LOG_FILE=logs/backend.log` (Claude reads this file instead of the user copying the terminal).
 2. Terminal 1: `poetry run relaypay-backend` (look for "MCP server ready" and "Agent model: …").
 3. Terminal 2: `ngrok http 8000` (static domain `latitude-mounting-empirical.ngrok-free.dev`).
 4. Vapi dashboard → assistant "Precious – RelayPay Support" (id `475035be-518c-416b-ab01-2de46a8f3bd6`) → Talk to Assistant.
@@ -21,8 +21,8 @@ For the next Claude Code session. Read this, then `docs/BUILD_PLAN.md` ("▶ Nex
 
 - Custom LLM URL = the ngrok base URL. **Our secret goes in `model.headers["X-RelayPay-Secret"]`**, because the org-wide Custom LLM key always fills `Authorization` (and is visible to the org).
 - `server.url` = `…/vapi/events`, same header; `serverMessages` = status-update, end-of-call-report.
-- `endCallPhrases` = "This call will now end", "Thanks for calling RelayPay".
-- LiveKit endpointing, `waitSeconds` 0.6, `stopSpeakingPlan.numWords` 2, voice `chunkPlan.minCharacters` 10.
+- `endCallPhrases` = `goodbye` (one word; Vapi splits longer phrases). The model never says it: it writes `<end_call/>` and the backend says the goodbye.
+- LiveKit endpointing, `waitSeconds` 0.6, `stopSpeakingPlan.numWords` 2, voice `chunkPlan.minCharacters` 30 (the default; 10 split phrases).
 - All changes are made with PowerShell PATCH commands the user runs; Claude never handles the private key.
 
 ## Lessons from today (the user cares about these)

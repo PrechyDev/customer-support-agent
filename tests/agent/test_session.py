@@ -48,6 +48,20 @@ def test_a_reply_without_say_tags_speaks_nothing():
     assert turn.text == ""  # the manager then asks the caller to repeat
 
 
+def test_the_model_can_never_say_a_hang_up_phrase():
+    """Regression: Haiku greeted a caller with a hang-up phrase and Vapi hung up mid-call."""
+    greeting = "Hi there. No need to say Goodbye yet. How can I help with your payout?"
+    client = FakeClient([[*reply(greeting), result()]])
+    said = spoken(collect(AgentSession(client, "call-1", turn_timeout_seconds=5)))
+    assert said == "Hi there. No need to say bye for now yet. How can I help with your payout?"
+
+
+def test_end_call_signal_is_passed_on():
+    client = FakeClient([[*reply("<end_call/>", say=False), result()]])
+    turn = collect(AgentSession(client, "call-1", turn_timeout_seconds=5))[-1]
+    assert (turn.end_requested, turn.text) == (True, "")
+
+
 def test_without_stream_events_full_messages_are_used_the_same_way():
     client = FakeClient([[assistant_only("Let me check.", tool=KB_TOOL), assistant_only("Hello, how can I help?"), result()]])
     assert spoken(collect(AgentSession(client, "call-1", turn_timeout_seconds=5))) == "Hello, how can I help?"
