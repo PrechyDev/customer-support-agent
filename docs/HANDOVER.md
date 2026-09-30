@@ -7,7 +7,8 @@ For the next Claude Code session. Read this, then `docs/BUILD_PLAN.md` ("▶ Nex
 - **Working end to end:** Vapi web call → ngrok → FastAPI `/chat/completions` → Claude Agent SDK (Haiku 4.5) → MCP server `relaypay` → `search_knowledge_base` (in-memory BM25 over the KB).
 - **Built and committed:** KB search, MCP server (Streamable HTTP on 127.0.0.1:8001, bearer token), agent sessions (locked-down SDK options, one session per call), Vapi endpoint, `/vapi/events` webhook (prewarm on call start, close on call end), conversation flow (SPECS §2b), grounding prompt.
 - **Built and tested, NOT yet voice-tested:** `<say>` tags (only text inside is spoken), a limit on waiting for a call's engine (15 s), prompt rules "never claim an action you can't do" and "never say where to find something unless the KB says so".
-- **Not built yet:** Supabase (Phase 2), the other 6 MCP tools (Phase 3), hardening (Phase 5), voice page (Phase 6), deploy (Phase 7), console (Phase 8), evaluations (Phase 9), submission docs (Phase 10).
+- **Supabase (Phase 2) done:** `poetry run relaypay-db` creates the 10 tables (`migrations/001_schema.sql`, RLS on, no policies) and upserts the seed data from `data/seed/`. Safe to re-run.
+- **Not built yet:** the other 6 MCP tools (Phase 3), hardening (Phase 5), voice page (Phase 6), deploy (Phase 7), console (Phase 8), evaluations (Phase 9), submission docs (Phase 10).
 
 ## How to run a test call
 

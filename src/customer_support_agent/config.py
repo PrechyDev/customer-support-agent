@@ -163,3 +163,16 @@ def load_agent_settings(env: Mapping[str, str] | None = None) -> AgentSettings:
         mcp_auth_token=_mcp_token(env),
     )
 
+
+
+def load_database_url(env: Mapping[str, str] | None = None) -> str:
+    """The Supabase session-pooler connection string. The value is never put in an error message."""
+    env = os.environ if env is None else env
+    url = env.get("DATABASE_URL", "").strip()
+    if not url:
+        raise ConfigError("DATABASE_URL is not set (Supabase -> Connect -> Session pooler; see .env.example)")
+    if not url.startswith(("postgresql://", "postgres://")):
+        raise ConfigError("DATABASE_URL must start with postgresql://")
+    if "[YOUR-PASSWORD]" in url or "<password>" in url:
+        raise ConfigError("DATABASE_URL still has the password placeholder in it")
+    return url

@@ -19,7 +19,7 @@ State: voice calls work end to end on Haiku 4.5 (grounded, clean turn-taking, wa
 4. [ ] **Confirm the model decision** (provisionally Haiku 4.5, see `submission/LATENCY_RESULTS.md`), then set it in `.env.example` and the reflections notes.
 4b. [x] **"Hold on" / "wait" rule:** when the caller says it, Bex briefly acknowledges and waits, instead of restarting the answer. Plus the "what the caller actually heard" fix (use Vapi's truncated last assistant message).
 5. [ ] Vapi silence hooks (60 s / 120 s) still to add; save the final assistant settings as `docs/vapi-assistant.json` (no secrets).
-6. [ ] **Phase 2: Supabase**: schema + seed data (5 customers, 5 transactions, 3 payouts) + runtime tables.
+6. [x] **Phase 2: Supabase**: schema + seed data (5 customers, 5 transactions, 3 payouts) + runtime tables.
 7. [ ] **Phase 3: MCP tools**: lookup_customer, lookup_transaction, lookup_payout, create_support_ticket, create_escalation, log_conversation_event (rules in SPECS §3–§6, §9).
 8. [ ] Deadline: **Friday 2 Oct, 12:00**. Leave Thursday for deploy (Phase 7), console (Phase 8), evaluations and submission docs.
 
@@ -66,11 +66,11 @@ Goal: measure latency and accuracy by voice before building the rest.
 
 ## Phase 2: Supabase
 - [x] Decide on DB access: `psycopg` + session pooler `DATABASE_URL`
-- [ ] SQL migration: seed tables with status CHECK constraints
-- [ ] SQL migration: runtime tables (SPECS §10)
-- [ ] RLS on for every table, no anonymous policies
-- [ ] Seed script, safe to re-run (upsert on IDs)
-- [ ] Verify the row counts: 5 customers, 5 transactions, 3 payouts
+- [x] SQL migration: seed tables with status CHECK constraints (`migrations/001_schema.sql`)
+- [x] SQL migration: runtime tables (SPECS §10), speakable IDs T-1001 / E-1001, one-ticket-per-(conversation, category, reference)
+- [x] RLS on for every table, no policies (verified: 10 tables, RLS on, 0 policies)
+- [x] Seed script, safe to re-run (upsert on IDs): `poetry run relaypay-db` (rows validated before connecting)
+- [x] Verify the row counts: 5 customers, 5 transactions, 3 payouts (ran twice: same counts)
 
 ## Phase 3: MCP tools
 - [ ] `lookup_customer` (server-side email + company check, `found: false` on mismatch)
