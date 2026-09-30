@@ -18,9 +18,11 @@ def _event(event: dict) -> StreamEvent:
     return StreamEvent(uuid="u", session_id="s", event=event)
 
 
-def reply(text: str | None = None, tool: str | None = None, pieces: int = 2) -> list:
+def reply(text: str | None = None, tool: str | None = None, pieces: int = 2, say: bool = True) -> list:
     """One model message as the real stream sends it: start, text deltas, optional tool call, stop,
-    then the full AssistantMessage record."""
+    then the full AssistantMessage record. Text is wrapped in <say> tags unless say=False."""
+    if text and say and not tool:
+        text = f"<say>{text}</say>"
     out = [_event({"type": "message_start", "message": {"id": "m"}})]
     if text:
         out.append(_event({"type": "content_block_start", "content_block": {"type": "text"}}))
@@ -37,6 +39,8 @@ def reply(text: str | None = None, tool: str | None = None, pieces: int = 2) -> 
 
 def assistant_only(text: str | None = None, tool: str | None = None) -> AssistantMessage:
     """A full message with no stream events (partial streaming off)."""
+    if text and not tool:
+        text = f"<say>{text}</say>"
     blocks = ([TextBlock(text=text)] if text else []) + ([ToolUseBlock(id="t1", name=tool, input={})] if tool else [])
     return AssistantMessage(content=blocks, model="test-model")
 

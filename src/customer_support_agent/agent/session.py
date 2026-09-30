@@ -3,7 +3,9 @@
 `ask()` yields TextDelta pieces, then exactly one TurnResult. It never raises: every failure
 becomes a TurnResult with an outcome the SessionManager turns into a spoken line.
 
-Two rules from the conversation-flow design:
+Three rules from the conversation-flow design:
+- Only words inside <say>...</say> are spoken. Anything else the model writes (reasoning, notes) is
+  dropped, so its thinking can never reach the caller (Haiku reasoned out loud in a real call).
 - Complete messages: each model message is held until it ends. If it called a tool, its text was
   narration ("Let me search...") and is dropped; otherwise it's the answer and is sent whole.
 - Clean cancellation: if a turn is abandoned (Vapi cancelled the request, or it timed out), the
@@ -28,6 +30,19 @@ Outcome = Literal["ok", "max_turns", "error", "timeout", "busy"]
 
 DRAIN_TIMEOUT_SECONDS = 5.0  # longer than this and the session is replaced instead of reused
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+_SAY = re.compile(r"<say>(.*?)(?:</say>|$)", re.DOTALL)
+
+
+def say_text(raw: str, final: bool) -> str:
+    """The spoken part of a model message: everything inside <say> tags, joined.
+
+    While the message is still streaming (final=False), a half-written tag at the end ("</sa") is
+    cut off so it's never spoken.
+    """
+    text = " ".join(part.strip() for part in _SAY.findall(raw))
+    if not final and "<" in text[-7:]:
+        text = text[: text.rfind("<")]
+    return text.strip()
 
 
 @dataclass(frozen=True)
@@ -67,11 +82,11 @@ _DONE = object()
 class _Turn:
     """Turns the SDK's messages for one turn into speakable replies (SPECS §2b).
 
+    - Only text inside <say> tags is spoken; reasoning outside them is dropped.
     - Before any tool has been called, each message is held until it ends: if it calls a tool, its
-      text was narration and is dropped; otherwise it's sent whole.
-    - After a tool result, the model is answering, so complete sentences are sent as soon as they're
-      written (saves waiting for the whole answer). Narration between two tool calls is rare; if it
-      happens, sentences already sent can't be taken back.
+      text was narration and is dropped; otherwise its <say> text is sent whole.
+    - After a tool result, the model is answering, so complete <say> sentences are sent as soon as
+      they're written. Narration between two tool calls is rare; sentences already sent can't be taken back.
     """
 
     def __init__(self, conversation_id: str) -> None:
@@ -80,7 +95,8 @@ class _Turn:
         self.tools: list[str] = []
         self.result: ResultMessage | None = None
         self._saw_stream = False  # raw stream events arrived, so they (not full messages) drive speech
-        self._buffer = ""
+        self._raw = ""  # everything the model wrote in the current message
+        self._sent = 0  # characters of this message's <say> text already spoken
         self._message_calls_tool = False
         self._tool_called = False  # any tool call so far in this turn
 
@@ -92,9 +108,10 @@ class _Turn:
             self.tools += [b.name for b in message.content if isinstance(b, ToolUseBlock)]
             if self._saw_stream:
                 return []  # already handled from the stream events
-            text = " ".join(b.text for b in message.content if isinstance(b, TextBlock)).strip()
+            raw = " ".join(b.text for b in message.content if isinstance(b, TextBlock))
             calls_tool = any(isinstance(b, ToolUseBlock) for b in message.content)
-            return self._speak(text) if text and not calls_tool else self._drop(text)
+            self._raw, self._sent = raw, 0
+            return self._drop() if calls_tool else self._finish()
         if isinstance(message, ResultMessage):
             self.result = message
         return []
@@ -102,23 +119,33 @@ class _Turn:
     def _on_stream_event(self, event: dict[str, Any]) -> list[AgentEvent]:
         kind = event.get("type")
         if kind == "message_start":
-            self._buffer, self._message_calls_tool = "", False
+            self._raw, self._sent, self._message_calls_tool = "", 0, False
         elif kind == "content_block_start" and (event.get("content_block") or {}).get("type") == "tool_use":
             self._message_calls_tool = self._tool_called = True
-            dropped = self._drop(self._buffer)
-            self._buffer = ""
-            return dropped
+            return self._drop()
         elif kind == "content_block_delta":
             delta = event.get("delta") or {}
             if delta.get("type") == "text_delta" and delta.get("text") and not self._message_calls_tool:
-                self._buffer += delta["text"]
+                self._raw += delta["text"]
                 if self._tool_called:  # answering after a tool: send finished sentences now
-                    *done, self._buffer = _SENTENCE_END.split(self._buffer)
+                    unsent = say_text(self._raw, final=False)[self._sent:]
+                    *done, rest = _SENTENCE_END.split(unsent)
+                    self._sent += len(unsent) - len(rest)  # everything before `rest` is now spoken
                     return [event for sentence in done for event in self._speak(sentence)]
         elif kind == "message_stop":
-            text, self._buffer = self._buffer, ""
-            return self._drop(text) if self._message_calls_tool else self._speak(text)
+            return self._drop() if self._message_calls_tool else self._finish()
         return []
+
+    def _finish(self) -> list[AgentEvent]:
+        spoken = say_text(self._raw, final=True)
+        if self._raw.strip() and not spoken:
+            logger.warning("Model reply had no <say> text; nothing spoken (conversation=%s)", self._conversation_id)
+        outside = _SAY.sub("", self._raw).strip()
+        if outside:
+            logger.debug("Dropped text outside <say> (conversation=%s): %r", self._conversation_id, outside)
+        events = self._speak(spoken[self._sent:])
+        self._raw, self._sent = "", 0
+        return events
 
     def _speak(self, text: str) -> list[AgentEvent]:
         text = text.strip()
@@ -128,9 +155,10 @@ class _Turn:
         self.spoken.append(text)
         return [TextDelta(piece)]
 
-    def _drop(self, text: str) -> list[AgentEvent]:
-        if text.strip():
-            logger.debug("Dropped narration before a tool call (conversation=%s): %r", self._conversation_id, text)
+    def _drop(self) -> list[AgentEvent]:
+        if self._raw.strip():
+            logger.debug("Dropped narration before a tool call (conversation=%s): %r", self._conversation_id, self._raw)
+        self._raw, self._sent = "", 0
         return []
 
 

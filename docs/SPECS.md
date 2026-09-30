@@ -68,7 +68,7 @@ After an escalation, the agent stops trying to solve *that* issue, but can still
 
 ### Grounding rules (after the first test calls)
 
-The agent: searches before **every** product or policy answer, including follow-ups; says **only** what the returned text states (no added amounts, currencies, payment methods, country rules, timelines or factors); says plainly when it lacks a detail, shares what the KB does say, and offers a specialist; asks a question only if the answer changes what it can say or do; never narrates or describes the customer; gives one answer per reply. Asking again for something it doesn't have → escalate.
+The agent never claims an action it can't do ("I've flagged this for a specialist": no tool exists in Phase 1), and never tells customers where to find something unless the KB says so. The agent: searches before **every** product or policy answer, including follow-ups; says **only** what the returned text states (no added amounts, currencies, payment methods, country rules, timelines or factors); says plainly when it lacks a detail, shares what the KB does say, and offers a specialist; asks a question only if the answer changes what it can say or do; never narrates or describes the customer; gives one answer per reply. Asking again for something it doesn't have → escalate.
 
 ---
 
@@ -84,10 +84,11 @@ Designed after the first voice tests, where early guesses by Vapi caused double 
 - `stopSpeakingPlan.numWords = 2`: noise and "uh" don't cut Bex off. Real interruptions ("no", "wait", "actually") still work instantly (Vapi's built-in list).
 
 **2. Backend turn rules**
-- One turn at a time per call (per-call lock).
+- One turn at a time per call (per-call lock). Waiting for the call's previous turn or its prewarm is capped at the turn timeout (15 s); past that, the caller hears the technical-problem line, never silence.
 - When Vapi cancels a request (a newer one replaces it, or the caller barges in): **interrupt** the engine, then **drain** its leftover output up to the end-of-turn marker, **before** the next turn starts. If draining takes more than a few seconds, close the session; the next message starts a fresh one.
 
 **3. Speaking**
+- **Only text inside `<say>…</say>` is spoken.** The model puts the exact words for the caller inside the tags. Anything outside (reasoning, notes) is dropped and logged at debug, so its thinking can never reach the caller (Haiku reasoned out loud in a real call, in a reply with no tool call, which the narration guard couldn't catch). A reply with no `<say>` text speaks nothing, logs a warning, and the caller hears "could you say that again?".
 - **Before any tool call**, each model message is held until it ends. If it called a tool, its text was narration: **dropped** (logged at debug). Otherwise it's the answer: **sent whole**.
 - **After a tool result**, the model is answering, so **complete sentences are sent as soon as they're written** (option C). Narration between two tool calls is rare; sentences already sent can't be taken back.
 - "Empty reply" is decided from what was actually spoken.

@@ -54,7 +54,8 @@ def main() -> int:
     mcp_app = create_mcp_app(kb=kb, log_store=JsonlRetrievalLogStore(mcp_settings.retrieval_log_path),
                              token=mcp_settings.mcp_auth_token, host=mcp_settings.mcp_host)
     manager = SessionManager(make_session_factory(agent_settings, kb), max_sessions=agent_settings.max_sessions,
-                             idle_seconds=agent_settings.session_idle_seconds)
+                             idle_seconds=agent_settings.session_idle_seconds,
+                             wait_seconds=agent_settings.turn_timeout_seconds)
     app = create_app(manager, vapi_secret=backend.vapi_llm_secret)
 
     logger.info("Agent model: %s", agent_settings.model)

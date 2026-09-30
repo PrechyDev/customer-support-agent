@@ -168,3 +168,17 @@ def test_prewarm_starts_the_engine_before_the_first_words_and_respects_the_cap()
     assert asyncio.run(scenario()) is True
     assert factory.created["a"].queries == ["hi"]
     assert "b" not in factory.created
+
+
+def test_a_hung_prewarm_never_leaves_the_caller_in_silence():
+    m = SessionManager(Factory(delay=5), max_sessions=10, idle_seconds=180, wait_seconds=0.1, clock=Clock())
+
+    async def scenario():
+        warming = asyncio.create_task(m.prewarm("a"))  # the engine start hangs
+        await asyncio.sleep(0.01)
+        said = await ask(m, "a")
+        warming.cancel()
+        return said
+
+    spoken, last = asyncio.run(scenario())
+    assert (spoken, last.outcome) == (fallbacks.TECHNICAL_PROBLEM, "timeout")

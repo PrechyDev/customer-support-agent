@@ -26,8 +26,9 @@ class _Entry:
 
 class SessionManager:
     def __init__(self, factory: SessionFactory, *, max_sessions: int, idle_seconds: float,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+                 wait_seconds: float = 15.0, clock: Callable[[], float] = time.monotonic) -> None:
         self._factory = factory
+        self._wait_seconds = wait_seconds  # max wait for a call's previous turn or its prewarm to finish
         self._max_sessions = max_sessions
         self._idle_seconds = idle_seconds
         self._clock = clock
@@ -53,7 +54,16 @@ class SessionManager:
             # Registered before any await, so a second message for this call finds it and waits on the lock.
             entry = self._entries[conversation_id] = _Entry(last_used=self._clock())
 
-        async with entry.lock:
+        try:  # waits for the call's previous turn, or its prewarm, but never forever
+            await asyncio.wait_for(entry.lock.acquire(), timeout=self._wait_seconds)
+        except TimeoutError:
+            logger.warning("Gave up waiting for the call's engine after %.0f s (conversation=%s)",
+                           self._wait_seconds, conversation_id)
+            yield TextDelta(fallbacks.TECHNICAL_PROBLEM)
+            yield TurnResult(outcome="timeout", error="waited too long for the call's engine",
+                             fallback=fallbacks.TECHNICAL_PROBLEM)
+            return
+        try:
             # Waits for any drain of an abandoned turn, so this turn starts on a clean stream.
             if entry.session is not None and not await entry.session.ready():
                 logger.warning("Replacing agent session that couldn't be cleaned (conversation=%s)", conversation_id)
@@ -89,6 +99,8 @@ class SessionManager:
             entry.last_used = self._clock()
             if ends_call:  # Vapi hangs up on the end-call phrase; free the engine now
                 await self.close(conversation_id)
+        finally:
+            entry.lock.release()
 
     @staticmethod
     def _fallback_for(entry: _Entry, result: TurnResult) -> tuple[str | None, bool]:

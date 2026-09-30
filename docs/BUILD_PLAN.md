@@ -9,6 +9,19 @@ Last updated: 29-09-2026
 
 ---
 
+## ▶ Next session (start here): 30-09-2026
+
+State: voice calls work end to end on Haiku 4.5 (grounded, clean turn-taking, warm goodbye, prewarm, webhook close). Latest fixes (`<say>` tags, prewarm wait limit, "never claim an action") are built and tested but **not yet voice-tested**.
+
+1. [ ] **Voice-test the latest fixes on Haiku:** both test conversations (new customer; customer with problems). Check: no spoken reasoning, no "I've flagged this", grounded answers, one clear next step per reply, the goodbye ends the call, `Prewarmed agent session` during the greeting.
+2. [ ] **Add `LOG_FILE=logs/backend.log`** (backend also writes its log to a gitignored file) so Claude reads the logs directly instead of copy-paste.
+3. [ ] **Check the garbled words** seen in the Sonnet run ("A special. Will need…", "Delays. Specific. ally…"): compare `Sent to Vapi` with Vapi's transcript. Our text or Vapi's voice?
+4. [ ] **Confirm the model decision** (provisionally Haiku 4.5, see `submission/LATENCY_RESULTS.md`), then set it in `.env.example` and the reflections notes.
+5. [ ] Vapi silence hooks (60 s / 120 s) still to add; save the final assistant settings as `docs/vapi-assistant.json` (no secrets).
+6. [ ] **Phase 2: Supabase**: schema + seed data (5 customers, 5 transactions, 3 payouts) + runtime tables.
+7. [ ] **Phase 3: MCP tools**: lookup_customer, lookup_transaction, lookup_payout, create_support_ticket, create_escalation, log_conversation_event (rules in SPECS §3–§6, §9).
+8. [ ] Deadline: **Friday 2 Oct, 12:00**. Leave Thursday for deploy (Phase 7), console (Phase 8), evaluations and submission docs.
+
 ## Phase 0: Planning docs
 - [x] Business rules agreed and logged in the decisions log
 - [x] `docs/SPECS.md`

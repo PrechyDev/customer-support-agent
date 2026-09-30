@@ -34,6 +34,20 @@ def test_after_a_tool_the_answer_streams_sentence_by_sentence():
     assert texts == ["Fees depend on the corridor.", " You'll see the exact fee before you confirm."]  # 2 sentences
 
 
+def test_reasoning_outside_say_tags_is_never_spoken():
+    """The exact leak from a real Haiku call: reasoning written as the answer, then the real question."""
+    leak = ("The customer has said they don't need a specialist. I should ask if there's anything else. "
+            "<say>Sounds good. Anything else I can help with?</say>")
+    client = FakeClient([[*reply(leak, say=False, pieces=9), result()]])
+    assert spoken(collect(AgentSession(client, "call-1", turn_timeout_seconds=5))) == "Sounds good. Anything else I can help with?"
+
+
+def test_a_reply_without_say_tags_speaks_nothing():
+    client = FakeClient([[*reply("I forgot the tags.", say=False), result()]])
+    turn = collect(AgentSession(client, "call-1", turn_timeout_seconds=5))[-1]
+    assert turn.text == ""  # the manager then asks the caller to repeat
+
+
 def test_without_stream_events_full_messages_are_used_the_same_way():
     client = FakeClient([[assistant_only("Let me check.", tool=KB_TOOL), assistant_only("Hello, how can I help?"), result()]])
     assert spoken(collect(AgentSession(client, "call-1", turn_timeout_seconds=5))) == "Hello, how can I help?"
