@@ -8,7 +8,7 @@ nothing drains the rest, the next turn reads the leftovers (the bug this fake no
 import asyncio
 from collections import deque
 
-from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolUseBlock
+from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolResultBlock, ToolUseBlock, UserMessage
 from claude_agent_sdk.types import StreamEvent
 
 KB_TOOL = "mcp__relaypay__search_knowledge_base"
@@ -43,6 +43,11 @@ def assistant_only(text: str | None = None, tool: str | None = None) -> Assistan
         text = f"<say>{text}</say>"
     blocks = ([TextBlock(text=text)] if text else []) + ([ToolUseBlock(id="t1", name=tool, input={})] if tool else [])
     return AssistantMessage(content=blocks, model="test-model")
+
+
+def tool_result(text: str) -> UserMessage:
+    """What the engine passes back after a tool runs (MCP results arrive as text content)."""
+    return UserMessage(content=[ToolResultBlock(tool_use_id="t1", content=[{"type": "text", "text": text}])])
 
 
 def result(subtype: str = "success", is_error: bool = False, num_turns: int = 2, cost: float = 0.0012) -> ResultMessage:

@@ -5,11 +5,13 @@ stays easy to test with a plain dict.
 """
 
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 MIN_TOKEN_LENGTH = 32
+_SCHEMA_NAME = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 
@@ -84,6 +86,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         mcp_port=_port(env.get("MCP_PORT", "8001")),
         mcp_auth_token=token,
         log_level=log_level,
+        log_file=Path(env["LOG_FILE"]) if env.get("LOG_FILE", "").strip() else None,
     )
 
 
@@ -176,3 +179,13 @@ def load_database_url(env: Mapping[str, str] | None = None) -> str:
     if "[YOUR-PASSWORD]" in url or "<password>" in url:
         raise ConfigError("DATABASE_URL still has the password placeholder in it")
     return url
+
+
+def load_database_schema(env: Mapping[str, str] | None = None) -> str:
+    """Which set of tables to use: "public" (the real records) or e.g. "test" (throwaway test data with
+    its own ticket numbers). Strictly validated, because it goes into the connection settings."""
+    env = os.environ if env is None else env
+    schema = env.get("DATABASE_SCHEMA", "public").strip() or "public"
+    if not _SCHEMA_NAME.fullmatch(schema):
+        raise ConfigError("DATABASE_SCHEMA must be lowercase letters, digits or underscores, e.g. public or test")
+    return schema

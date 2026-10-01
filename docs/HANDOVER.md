@@ -1,4 +1,4 @@
-# Handover: end of 29-09-2026
+# Handover: end of 01-10-2026
 
 For the next Claude Code session. Read this, then `docs/BUILD_PLAN.md` ("▶ Next session"), then `docs/SPECS.md`.
 
@@ -8,7 +8,31 @@ For the next Claude Code session. Read this, then `docs/BUILD_PLAN.md` ("▶ Nex
 - **Built and committed:** KB search, MCP server (Streamable HTTP on 127.0.0.1:8001, bearer token), agent sessions (locked-down SDK options, one session per call), Vapi endpoint, `/vapi/events` webhook (prewarm on call start, close on call end), conversation flow (SPECS §2b), grounding prompt.
 - **Built and tested, NOT yet voice-tested:** `<say>` tags (only text inside is spoken), a limit on waiting for a call's engine (15 s), prompt rules "never claim an action you can't do" and "never say where to find something unless the KB says so".
 - **Supabase (Phase 2) done:** `poetry run relaypay-db` creates the 10 tables (`migrations/001_schema.sql`, RLS on, no policies) and upserts the seed data from `data/seed/`. Safe to re-run.
-- **Not built yet:** the other 6 MCP tools (Phase 3), hardening (Phase 5), voice page (Phase 6), deploy (Phase 7), console (Phase 8), evaluations (Phase 9), submission docs (Phase 10).
+- **Phase 3 built, tested offline, NOT voice-tested yet (uncommitted until the user says commit):**
+  - all 7 MCP tools on Supabase: `mcp_server/tools/{accounts,cases,common}.py`, pure rules in `domain/` (spoken references, statuses, callback windows), all SQL in `db/repository.py` (`migrations/002_phase3.sql` is applied)
+  - call records: `api/records.py` (conversation row, one row per turn, Vapi's end-of-call summary, `abandoned` on idle close), all in the background
+  - pre-call form: `api/caller.py` reads Vapi metadata → prompt ("typed, NOT verified") + conversation row + escalation contact
+  - grounding: `<say type sources>` parsed in `agent/session.py`, judged in `agent/grounding.py` → `answer_type` + `confidence_note`; "NOT GROUNDED" also logged as a warning
+  - prompt: Phase 3 rules added (lookups, verification, tickets/escalations, callbacks, events, grounding A + case-3)
+  - checks: 102 tests + 3 real-database tests (`RUN_DB_TESTS=1`, test schema only); a real-Supabase smoke test of every tool over MCP HTTP (no model, no Vapi; rows deleted). Tool times on the session pooler: lookups ~0.15 s, verification ~0.55 s, ticket ~0.45 s, escalation ~0.8 s.
+- **Not built yet:** log-only phrase check and rate limiting (Phase 5), voice page with the form (Phase 6), deploy (Phase 7), console (Phase 8), evaluations (Phase 9), submission docs (Phase 10).
+
+## Test data vs real records
+
+- `public` schema = the real records (tickets start at T-1001). `test` schema = a throwaway copy with its own counters, created with `DATABASE_SCHEMA=test poetry run relaypay-db`.
+- Claude's smoke tests always use `test` and delete their rows. To make a whole practice call throwaway, set `DATABASE_SCHEMA=test` in `.env` and restart the backend (the startup log shows the schema).
+
+## Running the tests
+
+- Everything offline (no database, no Claude, no Vapi): `poetry run pytest -q`
+- Plus the real-database tests (Supabase `test` schema only; they clean up): `RUN_DB_TESTS=1 poetry run pytest -q` (PowerShell: `$env:RUN_DB_TESTS="1"; poetry run pytest -q`)
+- One area: `poetry run pytest -q tests/mcp_server` (or `tests/agent`, `tests/api`, `tests/domain`, `tests/kb`, `tests/db`)
+
+## Reading a call back
+
+- Database timeline of a call (turns with timings, tool calls, searches, events, tickets, escalations): `poetry run relaypay-call` (latest), `--list`, `--call <id>`, `--schema test`.
+- Backend log: `logs/backend.log` when `LOG_FILE=logs/backend.log` is in `.env` (fixed 01-10: the setting was never read before). Restart the backend after changing `.env`.
+- Vapi's side (what it heard, its own latency): the save-calls PowerShell command writes `logs/vapi-calls.json`.
 
 ## How to run a test call
 
@@ -25,6 +49,23 @@ For the next Claude Code session. Read this, then `docs/BUILD_PLAN.md` ("▶ Nex
 - `endCallPhrases` = `goodbye` (one word; Vapi splits longer phrases). The model never says it: it writes `<end_call/>` and the backend says the goodbye.
 - LiveKit endpointing, `waitSeconds` 0.6, `stopSpeakingPlan.numWords` 2, voice `chunkPlan.minCharacters` 30 (the default; 10 split phrases).
 - All changes are made with PowerShell PATCH commands the user runs; Claude never handles the private key.
+
+**Phase 3 settings to apply (user runs this, from the repo root):** sends the pre-call form to `/chat/completions` (`metadataSendMode: "variable"`) and turns on Vapi's end-of-call summary. It reads the current model first and sends it back whole, so the URL and `X-RelayPay-Secret` header are kept.
+
+```powershell
+$key = ((Get-Content .env | Where-Object { $_ -match '^VAPI_PRIVATE_KEY=' }) -replace '^VAPI_PRIVATE_KEY=','').Trim()
+$id = "475035be-518c-416b-ab01-2de46a8f3bd6"
+$h = @{ Authorization = "Bearer $key"; "Content-Type" = "application/json" }
+$a = Invoke-RestMethod -Uri "https://api.vapi.ai/assistant/$id" -Headers $h
+$a.model | Add-Member -NotePropertyName metadataSendMode -NotePropertyValue "variable" -Force
+$plan = if ($a.analysisPlan) { $a.analysisPlan } else { [pscustomobject]@{} }
+$plan | Add-Member -NotePropertyName summaryPlan -NotePropertyValue @{ enabled = $true } -Force
+$body = @{ model = $a.model; analysisPlan = $plan } | ConvertTo-Json -Depth 30
+$r = Invoke-RestMethod -Method Patch -Uri "https://api.vapi.ai/assistant/$id" -Headers $h -Body $body
+$r.model | Select-Object provider, url, metadataSendMode; $r.model.headers.PSObject.Properties.Name; $r.analysisPlan.summaryPlan
+```
+
+Expected: `metadataSendMode variable`, the header name `X-RelayPay-Secret` listed, `enabled True`. If Vapi rejects a field, nothing in the backend breaks: the form also arrives inside `call.assistantOverrides.metadata`, and without a summary `conversations.summary` stays empty.
 
 ## Lessons from today (the user cares about these)
 

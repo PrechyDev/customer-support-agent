@@ -5,23 +5,24 @@ Tick items as they're done (`[x]`). When something new comes up, add it to the r
 **Deadline: Friday 2 Oct 2026, 12:00pm.** Target 14/15.
 **Order:** backend → voice interface → support console → evaluations and submission.
 
-Last updated: 29-09-2026
+Last updated: 01-10-2026
 
 ---
 
-## ▶ Next session (start here): 30-09-2026
+## ▶ Next session (start here): 01-10-2026
 
-State: voice calls work end to end on Haiku 4.5 (grounded, clean turn-taking, warm goodbye, prewarm, webhook close). Latest fixes (`<say>` tags, prewarm wait limit, "never claim an action") are built and tested but **not yet voice-tested**.
+State: **Phase 3 is built and tested offline** (all 7 tools on Supabase, records, grounding check, pre-call form plumbing). 102 tests pass (+3 database tests, run with `RUN_DB_TESTS=1`, against the throwaway `test` schema). **Not yet voice-tested**: no real call has used the new tools.
 
-1. [ ] **Voice-test the latest fixes on Haiku:** both test conversations (new customer; customer with problems). Check: no spoken reasoning, no "I've flagged this", grounded answers, one clear next step per reply, the goodbye ends the call, `Prewarmed agent session` during the greeting.
-2. [x] **Add `LOG_FILE=logs/backend.log`** (backend also writes its log to a gitignored file) so Claude reads the logs directly instead of copy-paste.
-3. [ ] **Check the garbled words** seen in the Sonnet run ("A special. Will need…", "Delays. Specific. ally…"): compare `Sent to Vapi` with Vapi's transcript. Our text or Vapi's voice?
-4. [ ] **Confirm the model decision** (provisionally Haiku 4.5, see `submission/LATENCY_RESULTS.md`), then set it in `.env.example` and the reflections notes.
-4b. [x] **"Hold on" / "wait" rule:** when the caller says it, Bex briefly acknowledges and waits, instead of restarting the answer. Plus the "what the caller actually heard" fix (use Vapi's truncated last assistant message).
-5. [ ] Vapi silence hooks (60 s / 120 s) still to add; save the final assistant settings as `docs/vapi-assistant.json` (no secrets).
-6. [x] **Phase 2: Supabase**: schema + seed data (5 customers, 5 transactions, 3 payouts) + runtime tables.
-7. [ ] **Phase 3: MCP tools**: lookup_customer, lookup_transaction, lookup_payout, create_support_ticket, create_escalation, log_conversation_event (rules in SPECS §3–§6, §9).
-8. [ ] Deadline: **Friday 2 Oct, 12:00**. Leave Thursday for deploy (Phase 7), console (Phase 8), evaluations and submission docs.
+1. [ ] **Vapi settings (commands in HANDOVER):** model `metadataSendMode: "variable"` (keep the headers), `analysisPlan.summaryPlan.enabled: true`, and confirm the silence hooks (60 s / 120 s) are saved.
+2. [ ] **Voice-test Phase 3 on Haiku**, with LOG_LEVEL=DEBUG: the test scenarios (status lookups TXN-9001 / TXN-9004 / PAY-7002, verification right and wrong, restricted account + frustration, failed invoice with no reference, callback "tomorrow afternoon, Lagos", an injection attempt, one unknown topic). Check the Supabase rows after each call and look for `grounded=False` in the log.
+3. [ ] Earlier open items: garbled words check (item below), model decision, `docs/vapi-assistant.json`.
+4. [ ] Show the Phase 3 decision-log entries (drafted in the session summary) and add them to the reflections notes.
+5. [ ] Deadline: **Friday 2 Oct, 12:00**. Then voice page with the form (Phase 6), deploy (Phase 7), console (Phase 8), evaluations and submission docs.
+
+Still open from the last session:
+- [ ] **Check the garbled words** seen in the Sonnet run ("A special. Will need…", "Delays. Specific. ally…"): compare `Sent to Vapi` with Vapi's transcript. Our text or Vapi's voice?
+- [ ] **Confirm the model decision** (provisionally Haiku 4.5, see `submission/LATENCY_RESULTS.md`), then set it in `.env.example` and the reflections notes.
+- [x] `LOG_FILE=logs/backend.log`, the "hold on" rule, "what the caller actually heard", Phase 2 Supabase.
 
 ## Phase 0: Planning docs
 - [x] Business rules agreed and logged in the decisions log
@@ -73,33 +74,46 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [x] Verify the row counts: 5 customers, 5 transactions, 3 payouts (ran twice: same counts)
 
 ## Phase 3: MCP tools
-- [ ] `lookup_customer` (server-side email + company check, `found: false` on mismatch)
-- [ ] `lookup_transaction` (status only, date rule, ID normalisation)
-- [ ] `lookup_payout` (by payout or transaction ID, status only)
-- [ ] `create_support_ticket` (idempotent, speakable ID)
-- [ ] `create_escalation` (idempotent, linked ticket, call_booked rule, callback window: city or time zone → zoneinfo, trimmed to Mon–Fri 08:00–18:00 UTC, returned in local time)
-- [ ] `log_conversation_event`
-- [ ] Every tool writes to `tool_calls` and handles Supabase failures
-- [ ] Add `tzdata` (Windows and slim containers have no time zone database)
-- [ ] Unit tests per tool (missing records, mismatches, duplicates, DB down, callback windows: partly/fully outside hours, weekend, DST, unknown time zone)
+- [x] `lookup_customer` (server-side email + company check, `found: false` on mismatch)
+- [x] `lookup_transaction` (status only, date rule, ID normalisation)
+- [x] `lookup_payout` (by payout or transaction ID, status only)
+- [x] `create_support_ticket` (idempotent, speakable ID)
+- [x] `create_escalation` (idempotent, linked ticket, call_booked rule, callback window: city or time zone → zoneinfo, trimmed to Mon–Fri 08:00–18:00 UTC, returned in local time)
+- [x] `log_conversation_event`
+- [x] Every tool writes to `tool_calls` and handles Supabase failures
+- [x] Add `tzdata` (Windows and slim containers have no time zone database)
+- [x] Unit tests per tool (missing records, mismatches, duplicates, DB down, callback windows: partly/fully outside hours, weekend, DST, unknown time zone)
+
+- [x] Every escalation creates or links a ticket and logs `escalation_created` (one statement); caps 2 verifications / 3 tickets / 2 escalations
+- [x] Fewer database round trips per tool (upsert returns the row, one list query per call, escalation + event in one statement): ticket 1.1 s → 0.45 s, escalation 1.1 s → 0.8 s on the session pooler
+- [x] Real-Supabase smoke test of all tools over MCP HTTP (no model, no Vapi), rows cleaned up
 
 ## Phase 4: Agent
-- [ ] Full system prompt: response paths, verification flow, what can be said, escalation triggers, behaviour sections of the KB, callback hours in local time only (ask city or time zone, never mention UTC), current date/time
-- [ ] Verification state stored on the conversation record
-- [ ] Retrieval results written to `retrieval_logs`
-- [ ] Turns written to `conversation_turns` (answer type, confidence note, timings)
+- [x] Full system prompt: response paths, verification flow, what can be said, escalation triggers, behaviour sections of the KB, callback hours in local time only (ask city or time zone, never mention UTC), current date/time
+- [x] Verification state stored on the conversation record
+- [x] Retrieval results written to `retrieval_logs`
+- [x] Turns written to `conversation_turns` (answer type, confidence note, timings)
+
+- [x] `<say type sources>` labels; backend grounding check writes the confidence note ("NOT GROUNDED" flagged)
+- [x] Pre-call form (Vapi metadata) read by the backend: stored on the conversation, in the prompt as unverified contact details, used for escalations
+- [x] All 7 tools allowed in the SDK options (and nothing else)
+- [x] Pre-call form text never reaches the model (prompt shows only which fields were filled; tools read the values)
+- [x] Out of credit / bad API key ends the call at once (ERROR logged); second turn-limit hit escalates automatically
+- [x] Throwaway `test` schema (own ticket numbers) for smoke tests; real counters reset to T-1001 / E-1001
+- [x] Removed the unused `main.py` placeholder
+- [x] Review fixes: per-call lock can't be dropped while a tool waits; 2,000-character message cap; a repeated verification pair isn't counted (migration 003, applied to public and test); real-database tests for the SQL (`tests/db/test_repository_integration.py`)
 
 ## Phase 5: Backend hardening
-- [ ] Spoken fallback line on a Claude error or timeout
-- [ ] Logging after the response, errors caught
-- [ ] Log-only phrase check
-- [ ] Vapi end-of-call webhook: closes the agent session (done); still to do: close the *conversation record* in Supabase, `abandoned` if it never arrives
+- [x] Spoken fallback line on a Claude error or timeout
+- [x] Logging after the response, errors caught
+- [x] Log-only phrase check (flags go in the turn's confidence note)
+- [x] Vapi end-of-call webhook: closes the agent session and the conversation record (Vapi's summary, final status), `abandoned` if it never arrives (idle cleanup)
 - [x] Vapi call-started webhook: start the agent session while the greeting plays (built early, with the latency fixes)
 - [ ] Rate limiting on public endpoints
-- [ ] Attempt limits (verification, repeated sensitive requests)
+- [x] Attempt limits (verification, repeated sensitive requests)
 
 ## Phase 6: Voice interface
-- [ ] Voice page served by FastAPI, following `DESIGN.md`
+- [ ] Voice page served by FastAPI, following `DESIGN.md`, with the pre-call form (name, email required; company optional) sent as Vapi call metadata `{name, email, company}`
 - [ ] Vapi Web SDK with the public key only
 - [ ] States: idle, connecting, listening, agent speaking, ended, mic denied, error
 - [ ] Works on mobile width
@@ -174,7 +188,7 @@ Items marked *(verify)* get confirmed when we reach Phase 7.
 
 1. **Container:** `python:3.12-slim` (Debian, glibc), Poetry install without dev dependencies, runs `relaypay-backend` with `HOST=0.0.0.0`. **No Claude Code install needed:** the SDK's Linux wheel (`manylinux_2_17_x86_64`, in `poetry.lock`) bundles it. Run as a non-root user with a writable home and `/tmp` (the agent's working and config folders live there).
    - **Sizing (Agent SDK hosting docs):** about **1 GiB RAM and 1 CPU per concurrent agent session**. Set `AGENT_MAX_SESSIONS` to what the instance can hold, e.g. 4 GiB / 2 vCPU → `AGENT_MAX_SESSIONS=3`. Note that Cloud Run's `/tmp` is in memory, so it counts toward RAM.
-   - **One instance only (`--max-instances 1`):** each call's agent session lives in that instance's memory. A second instance wouldn't have it, so a caller whose next message landed there would lose the conversation. Scaling out later needs a `SessionStore` (hosting docs, "hybrid sessions") or session pinning.
+   - **One instance only (`--max-instances 1`), required:** the per-call lock that keeps verification, ticket and escalation caps safe lives in memory, and so does each call's agent session. A second instance wouldn't have it, so a caller whose next message landed there would lose the conversation. Scaling out later needs a `SessionStore` (hosting docs, "hybrid sessions") or session pinning.
 2. **Secrets:** create each one in Secret Manager (`ANTHROPIC_API_KEY`, `DATABASE_URL`, `VAPI_LLM_SECRET`, console login) and mount them as env variables. Never bake them into the image.
 3. **Deploy:** `gcloud run deploy relaypay-support --source . --region europe-west1 --min-instances 1 --set-secrets ...` *(verify flags)*.
    - **min instances 1:** no cold start at the beginning of a call. The cost trade-off is recorded in the reflections.

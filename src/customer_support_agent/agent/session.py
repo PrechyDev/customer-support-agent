@@ -4,7 +4,8 @@
 becomes a TurnResult with an outcome the SessionManager turns into a spoken line.
 
 Three rules from the conversation-flow design:
-- Only words inside <say>...</say> are spoken. Anything else the model writes (reasoning, notes) is
+- Only words inside <say ...>...</say> are spoken. The tag also carries the answer type and the
+  knowledge base chunks the answer came from, which the backend checks (agent/grounding.py). Anything else the model writes (reasoning, notes) is
   dropped, so its thinking can never reach the caller (Haiku reasoned out loud in a real call).
 - The model never ends a call itself. It writes <end_call/> and the backend says the fixed goodbye.
   Vapi hangs up on "goodbye", so any hang-up phrase the model writes is rewritten (Haiku once greeted
@@ -24,7 +25,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
-from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolUseBlock
+from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolResultBlock, ToolUseBlock, UserMessage
 from claude_agent_sdk.types import StreamEvent
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,11 @@ Outcome = Literal["ok", "max_turns", "error", "timeout", "busy"]
 
 DRAIN_TIMEOUT_SECONDS = 5.0  # longer than this and the session is replaced instead of reused
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
-_SAY = re.compile(r"<say>(.*?)(?:</say>|$)", re.DOTALL)
+_SAY = re.compile(r"<say(?:\s[^>]*)?>(.*?)(?:</say>|$)", re.DOTALL)
+_SAY_ATTRS = re.compile(r"<say\s([^>]*)>")
+_ATTR = re.compile(r'(\w+)\s*=\s*"([^"]*)"')
+ANSWER_TYPES = ("answer", "clarify", "escalate", "decline")
+_CHUNK_ID = re.compile(r'"chunk_id"\s*:\s*"([^"]+)"')  # only the knowledge base tool returns these
 _END_CALL = "<end_call"
 # The word Vapi hangs up on (fallbacks.END_CALL_PHRASE / endCallPhrases). The model's own words must
 # never contain it: only the backend's fixed ending lines do.
@@ -58,6 +63,23 @@ def say_text(raw: str, final: bool) -> str:
     return text.strip()
 
 
+def say_labels(raw: str) -> tuple[str | None, tuple[str, ...]]:
+    """The answer type and cited chunk IDs from <say type="..." sources="..."> tags (last type wins)."""
+    answer_type, sources = None, []
+    for attrs in _SAY_ATTRS.findall(raw):
+        values = dict(_ATTR.findall(attrs))
+        if values.get("type") in ANSWER_TYPES:
+            answer_type = values["type"]
+        sources += [s for s in re.split(r"[\s,]+", values.get("sources", "")) if s and s not in sources]
+    return answer_type, tuple(sources)
+
+
+def _result_text(content: Any) -> str:
+    if isinstance(content, list):
+        return " ".join(str(item.get("text", "")) if isinstance(item, dict) else str(item) for item in content)
+    return str(content or "")
+
+
 @dataclass(frozen=True)
 class TextDelta:
     text: str
@@ -75,6 +97,10 @@ class TurnResult:
     end_requested: bool = False  # the model wrote <end_call/>: the caller is done
     fallback: str | None = None  # the fixed line spoken instead of / after the model's text
     ends_call: bool = False  # the fallback line contains the end-call phrase, so Vapi hangs up
+    answer_type: str | None = None  # from <say type="...">; None if the model didn't label it
+    sources: tuple[str, ...] = ()  # chunk IDs the model says its answer came from
+    kb_chunks: tuple[str, ...] = ()  # chunk IDs the knowledge base actually returned this turn
+    api_error: str | None = None  # the engine's error kind, e.g. billing_error, authentication_failed
 
 
 AgentEvent = TextDelta | TurnResult
@@ -114,12 +140,18 @@ class _Turn:
         self._message_calls_tool = False
         self._tool_called = False  # any tool call so far in this turn
         self.end_requested = False
+        self.answer_type: str | None = None
+        self.sources: list[str] = []
+        self.kb_chunks: list[str] = []
+        self.api_error: str | None = None
 
     def on_message(self, message: Any) -> list[AgentEvent]:
         if isinstance(message, StreamEvent):
             self._saw_stream = True
             return self._on_stream_event(message.event)
         if isinstance(message, AssistantMessage):
+            if message.error:  # the API call failed; any text with it is an error message, never spoken
+                self.api_error = message.error
             self.tools += [b.name for b in message.content if isinstance(b, ToolUseBlock)]
             if self._saw_stream:
                 return []  # already handled from the stream events
@@ -127,6 +159,10 @@ class _Turn:
             calls_tool = any(isinstance(b, ToolUseBlock) for b in message.content)
             self._raw, self._sent = raw, 0
             return self._drop() if calls_tool else self._finish()
+        if isinstance(message, UserMessage) and isinstance(message.content, list):  # tool results
+            for block in message.content:
+                if isinstance(block, ToolResultBlock):
+                    self.kb_chunks += [c for c in _CHUNK_ID.findall(_result_text(block.content)) if c not in self.kb_chunks]
         if isinstance(message, ResultMessage):
             self.result = message
         return []
@@ -155,6 +191,10 @@ class _Turn:
         if _END_CALL in self._raw:
             self.end_requested = True
         spoken = say_text(self._raw, final=True)
+        if spoken:
+            answer_type, sources = say_labels(self._raw)
+            self.answer_type = answer_type or self.answer_type
+            self.sources += [s for s in sources if s not in self.sources]
         if self._raw.strip() and not spoken and not self.end_requested:
             logger.warning("Model reply had no <say> text; nothing spoken (conversation=%s)", self._conversation_id)
         outside = _SAY.sub("", self._raw).strip()
@@ -256,6 +296,10 @@ class AgentSession:
             duration_ms=round((time.perf_counter() - started) * 1000, 1),
             error=error,
             end_requested=turn.end_requested,
+            answer_type=turn.answer_type,
+            sources=tuple(turn.sources),
+            kb_chunks=tuple(turn.kb_chunks),
+            api_error=turn.api_error or _error_from_status(turn.result),
         )
         logger.info(
             "Agent turn (conversation=%s outcome=%s turns=%d tools=%s cost_usd=%s duration_ms=%.0f)",
@@ -300,6 +344,15 @@ class AgentSession:
         if result.is_error or result.subtype != "success":
             return "error", f"{result.subtype}: {result.errors or ''}".strip()
         return "ok", None
+
+
+def _error_from_status(result: ResultMessage | None) -> str | None:
+    status = result.api_error_status if result else None
+    if status in (401, 403):
+        return "authentication_failed"
+    if status == 402:
+        return "billing_error"
+    return None
 
 
 def _describe(item: Any) -> str:

@@ -10,10 +10,15 @@ import sys
 import uvicorn
 from dotenv import load_dotenv
 
-from customer_support_agent.config import ConfigError, load_settings
+from customer_support_agent.config import ConfigError, load_database_schema, load_database_url, load_settings
+from customer_support_agent.db.repository import Repository
 from customer_support_agent.kb import KnowledgeBase, KnowledgeBaseError
 from customer_support_agent.logging_setup import configure_logging
-from customer_support_agent.mcp_server.retrieval_log import JsonlRetrievalLogStore
+from customer_support_agent.mcp_server.retrieval_log import (
+    BackgroundLogStore,
+    JsonlRetrievalLogStore,
+    SupabaseRetrievalLogStore,
+)
 from customer_support_agent.mcp_server.server import create_app
 
 logger = logging.getLogger(__name__)
@@ -39,12 +44,15 @@ def main() -> int:
         logger.error("MCP server not started: %s", exc)
         return EXIT_STARTUP_ERROR
 
-    app = create_app(
-        kb=kb,
-        log_store=JsonlRetrievalLogStore(settings.retrieval_log_path),
-        token=settings.mcp_auth_token,
-        host=settings.mcp_host,
-    )
+    try:  # standalone runs (Inspector, graders) work without a database: only the KB tool is then usable
+        repo = Repository(load_database_url(), load_database_schema())
+        repo.open()
+        log_store = BackgroundLogStore(SupabaseRetrievalLogStore(repo))
+    except ConfigError as exc:
+        logger.warning("No database (%s): account, ticket and escalation tools will say 'unavailable'", exc)
+        repo, log_store = None, JsonlRetrievalLogStore(settings.retrieval_log_path)
+
+    app = create_app(kb=kb, log_store=log_store, token=settings.mcp_auth_token, host=settings.mcp_host, repo=repo)
     logger.info("MCP server '%s' listening on http://%s:%d/mcp", "relaypay", settings.mcp_host, settings.mcp_port)
     uvicorn.run(app, host=settings.mcp_host, port=settings.mcp_port, log_config=None)
     return 0

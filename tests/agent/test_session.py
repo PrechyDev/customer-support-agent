@@ -2,7 +2,7 @@ import asyncio
 
 from customer_support_agent.agent import session as session_module
 from customer_support_agent.agent.session import AgentSession, TextDelta
-from tests.agent.fakes import KB_TOOL, FakeClient, assistant_only, reply, result
+from tests.agent.fakes import KB_TOOL, FakeClient, assistant_only, reply, result, tool_result
 
 
 def collect(session, message="fees?"):
@@ -32,6 +32,17 @@ def test_after_a_tool_the_answer_streams_sentence_by_sentence():
     events = collect(AgentSession(client, "call-1", turn_timeout_seconds=5))
     texts = [e.text for e in events if isinstance(e, TextDelta)]
     assert texts == ["Fees depend on the corridor.", " You'll see the exact fee before you confirm."]  # 2 sentences
+
+
+def test_say_labels_are_read_but_never_spoken_and_found_chunks_are_tracked():
+    found = '{"found": true, "results": [{"chunk_id": "fees", "title": "Fees"}, {"chunk_id": "timelines"}]}'
+    labelled = '<say type="answer" sources="fees, invented">Fees depend on the corridor. That is all.</say>'
+    client = FakeClient([[*reply("Let me search.", tool=KB_TOOL), tool_result(found),
+                          *reply(labelled, pieces=12, say=False), result()]])
+    events = collect(AgentSession(client, "call-1", turn_timeout_seconds=5))
+    turn = events[-1]
+    assert spoken(events) == "Fees depend on the corridor. That is all."  # the tag's attributes stay silent
+    assert (turn.answer_type, turn.sources, turn.kb_chunks) == ("answer", ("fees", "invented"), ("fees", "timelines"))
 
 
 def test_reasoning_outside_say_tags_is_never_spoken():

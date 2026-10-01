@@ -13,20 +13,26 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from customer_support_agent.agent import fallbacks
+from customer_support_agent.agent.grounding import assess
+from customer_support_agent.agent.phrase_check import flag_phrases
 from customer_support_agent.agent.session import AgentEvent, TextDelta, TurnResult
 from customer_support_agent.api.auth import check_vapi_secret, describe_auth_header
+from customer_support_agent.api.caller import caller_from_vapi
 from customer_support_agent.api.heard import heard_note
 from customer_support_agent.api.openai_format import RequestError, completion, parse_request, sse_chunk, sse_done
+from customer_support_agent.api.records import CallRecorder
 
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = "relaypay-agent"  # what Vapi sees; the real model is AGENT_MODEL
 SECRET_HEADER = "x-relaypay-secret"
 
+TurnDone = Callable[[TurnResult | None, str, float | None], None]  # (result, text sent, first_text_ms)
+
 
 class Manager(Protocol):
-    def ask(self, conversation_id: str, message: str) -> AsyncIterator[AgentEvent]: ...
-    async def prewarm(self, conversation_id: str) -> None: ...
+    def ask(self, conversation_id: str, message: str, caller: dict | None = None) -> AsyncIterator[AgentEvent]: ...
+    async def prewarm(self, conversation_id: str, caller: dict | None = None) -> None: ...
     async def close(self, conversation_id: str) -> None: ...
     async def run_idle_reaper(self, interval_seconds: float = 30) -> None: ...
     async def close_all(self) -> None: ...
@@ -55,7 +61,10 @@ def _reject(request: Request, secret: str) -> JSONResponse:
 
 
 def create_app(manager: Manager, vapi_secret: str,
-               reassure_after: float = fallbacks.REASSURANCE_AFTER_SECONDS) -> FastAPI:
+               reassure_after: float = fallbacks.REASSURANCE_AFTER_SECONDS,
+               recorder: CallRecorder | None = None) -> FastAPI:
+    recorder = recorder or CallRecorder(None)  # no database: nothing is recorded, calls still work
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         reaper = asyncio.create_task(manager.run_idle_reaper())
@@ -64,10 +73,21 @@ def create_app(manager: Manager, vapi_secret: str,
         with contextlib.suppress(asyncio.CancelledError):
             await reaper
         await manager.close_all()
+        await recorder.wait()
 
     app = FastAPI(title="RelayPay support backend", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     auth_format_logged = False
     last_sent: dict[str, str] = {}  # call ID -> what we sent last turn (for "what the caller actually heard")
+    callers: dict[str, dict | None] = {}  # call ID -> pre-call form, from the first request or event that has it
+
+    def caller_for(call_id: str, body: Any) -> dict | None:
+        """The call's form data; the call's row is created the first time the call is seen."""
+        if call_id not in callers or callers[call_id] is None:
+            first_seen = call_id not in callers
+            callers[call_id] = caller_from_vapi(body)
+            if first_seen or callers[call_id] is not None:
+                recorder.started(call_id, callers[call_id])
+        return callers[call_id]
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -105,15 +125,31 @@ def create_app(manager: Manager, vapi_secret: str,
             logger.info("Caller interrupted the last reply; telling the agent what they heard (conversation=%s)", call_id)
             message = f"{note}\n{message}"
 
-        def remember(text: str) -> None:
-            last_sent[call_id] = text
+        caller = caller_for(call_id, body)
 
-        events = manager.ask(call_id, message)
+        def on_done(result: TurnResult | None, sent: str, first_text_ms: float | None) -> None:
+            last_sent[call_id] = sent
+            checked = assess(result, sent)
+            note = checked.note
+            flags = flag_phrases(sent)  # log-only: the reply is already spoken
+            if flags:
+                note = f"{note} PHRASE FLAG: {', '.join(flags)}."
+                logger.warning("Phrase check flagged the reply (conversation=%s): %s", call_id, ", ".join(flags))
+            _log_turn(call_id, started, first_text_ms, result, sent, checked.answer_type, checked.grounded)
+            recorder.turn(call_id, caller, parsed.message, sent, checked.answer_type, note,
+                          first_text_ms, _ms_since(started))
+
+        if len(parsed.message) > fallbacks.MAX_MESSAGE_CHARS:  # checked on the caller's own words, before Claude
+            logger.warning("Caller message too long (%d chars); not sent to the agent (conversation=%s)",
+                           len(parsed.message), call_id)
+            events = _fixed_line(fallbacks.TOO_LONG)
+        else:
+            events = manager.ask(call_id, message, caller)
         if parsed.stream:
             ladder = [(reassure_after, fallbacks.REASSURANCE)]
-            return StreamingResponse(_stream(events, call_id, chunk_id, started, ladder, remember),
+            return StreamingResponse(_stream(events, chunk_id, started, ladder, on_done),
                                      media_type="text/event-stream")
-        return JSONResponse(await _collect(events, call_id, chunk_id, started, remember))
+        return JSONResponse(await _collect(events, chunk_id, started, on_done))
 
     background: set[asyncio.Task[None]] = set()  # keeps prewarm/close tasks alive until they finish
 
@@ -136,9 +172,14 @@ def create_app(manager: Manager, vapi_secret: str,
             return JSONResponse({"error": "bad_request"}, status_code=400)
 
         if call_id and kind == "status-update" and message.get("status") in _STARTING:
-            run_in_background(manager.prewarm(str(call_id)))  # answer Vapi at once; the engine starts meanwhile
+            caller = caller_for(str(call_id), message)
+            run_in_background(manager.prewarm(str(call_id), caller))  # answer Vapi at once; the engine starts meanwhile
         elif call_id and (kind == "end-of-call-report" or (kind == "status-update" and message.get("status") == "ended")):
             last_sent.pop(str(call_id), None)
+            callers.pop(str(call_id), None)
+            analysis = message.get("analysis") if isinstance(message.get("analysis"), dict) else {}
+            summary = analysis.get("summary") if isinstance(analysis.get("summary"), str) else None
+            recorder.ended(str(call_id), summary)  # Vapi's end-of-call summary (analysisPlan.summaryPlan)
             run_in_background(manager.close(str(call_id)))
         logger.debug("Vapi event: type=%s status=%s call=%s", kind, message.get("status"), call_id)
         return {"ok": True}
@@ -146,8 +187,8 @@ def create_app(manager: Manager, vapi_secret: str,
     return app
 
 
-async def _stream(events: AsyncIterator[AgentEvent], call_id: str, chunk_id: str, started: float,
-                  ladder: list[tuple[float, str]], remember: Callable[[str], None]) -> AsyncIterator[str]:
+async def _stream(events: AsyncIterator[AgentEvent], chunk_id: str, started: float,
+                  ladder: list[tuple[float, str]], on_done: TurnDone) -> AsyncIterator[str]:
     """Streams the agent's reply (SPECS §2b).
 
     - No filler: answers take 2-5 s. Only a genuinely slow turn (no reply text at 10 s) hears one
@@ -196,12 +237,12 @@ async def _stream(events: AsyncIterator[AgentEvent], call_id: str, chunk_id: str
             with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
                 await pending
         await agent.aclose()  # the session schedules its own interrupt + drain, so this never has to wait long
-        remember("".join(sent))
-        _log_turn(call_id, started, first_text_ms, result, waiting_lines, "".join(sent))
+        if waiting_lines:
+            logger.info("Slow turn: the caller heard %d reassurance line(s)", waiting_lines)
+        on_done(result, "".join(sent), first_text_ms)
 
 
-async def _collect(events: AsyncIterator[AgentEvent], call_id: str, chunk_id: str, started: float,
-                   remember: Callable[[str], None]) -> dict[str, Any]:
+async def _collect(events: AsyncIterator[AgentEvent], chunk_id: str, started: float, on_done: TurnDone) -> dict[str, Any]:
     parts: list[str] = []
     result: TurnResult | None = None
     async with aclosing(events) as agent:
@@ -210,9 +251,14 @@ async def _collect(events: AsyncIterator[AgentEvent], call_id: str, chunk_id: st
                 parts.append(event.text)
             elif isinstance(event, TurnResult):
                 result = event
-    remember("".join(parts))
-    _log_turn(call_id, started, _ms_since(started) if parts else None, result, 0, "".join(parts))
+    on_done(result, "".join(parts), _ms_since(started) if parts else None)
     return completion("".join(parts), chunk_id=chunk_id, model=MODEL_NAME)
+
+
+async def _fixed_line(line: str) -> AsyncIterator[AgentEvent]:
+    """A reply from the backend alone, shaped like an agent turn so it streams and is logged the same way."""
+    yield TextDelta(line)
+    yield TurnResult(outcome="ok", fallback=line)
 
 
 def _ms_since(started: float) -> float:
@@ -220,14 +266,15 @@ def _ms_since(started: float) -> float:
 
 
 def _log_turn(call_id: str, started: float, first_text_ms: float | None, result: TurnResult | None,
-              waiting_lines: int, sent_text: str) -> None:
-    """One line per caller message: the numbers for the latency comparison."""
-    logger.info(
-        "Vapi turn (conversation=%s first_text_ms=%s total_ms=%s outcome=%s turns=%s cost_usd=%s "
-        "ends_call=%s waiting_lines=%d)",
-        call_id, first_text_ms, _ms_since(started),
-        result.outcome if result else "cancelled", result.num_turns if result else None,
-        result.cost_usd if result else None, result.ends_call if result else False, waiting_lines,
+              sent_text: str, answer_type: str, grounded: bool | None) -> None:
+    """One line per caller message: the numbers for the latency comparison, and the grounding check."""
+    logger.log(
+        logging.WARNING if grounded is False else logging.INFO,
+        "Vapi turn (conversation=%s first_text_ms=%s total_ms=%s outcome=%s type=%s grounded=%s turns=%s "
+        "tools=%s cost_usd=%s ends_call=%s)",
+        call_id, first_text_ms, _ms_since(started), result.outcome if result else "cancelled", answer_type,
+        grounded, result.num_turns if result else None, [t.rsplit("__", 1)[-1] for t in result.tools_used] if result else [],
+        result.cost_usd if result else None, result.ends_call if result else False,
     )
     # Exactly what Vapi received, to compare word by word with Vapi's transcript. DEBUG only:
     # replies can repeat customer details, so they stay out of normal logs (LOG_LEVEL=DEBUG).

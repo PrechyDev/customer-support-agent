@@ -2,7 +2,13 @@ from pathlib import Path
 
 import pytest
 
-from customer_support_agent.config import ConfigError, load_agent_settings, load_backend_settings, load_settings
+from customer_support_agent.config import (
+    ConfigError,
+    load_agent_settings,
+    load_backend_settings,
+    load_database_schema,
+    load_settings,
+)
 
 TOKEN = "x" * 32
 BASE = {"MCP_AUTH_TOKEN": TOKEN}
@@ -53,6 +59,18 @@ def test_backend_settings_protect_the_mcp_server():
                        ({"PORT": "8001"}, "PORT")):
         with pytest.raises(ConfigError, match=field):
             load_backend_settings({**ok, **bad})
+
+
+def test_database_schema_defaults_to_public_and_rejects_unsafe_names():
+    assert load_database_schema({}) == "public"
+    assert load_database_schema({"DATABASE_SCHEMA": "test"}) == "test"
+    with pytest.raises(ConfigError, match="DATABASE_SCHEMA"):
+        load_database_schema({"DATABASE_SCHEMA": "test; drop table customers"})
+
+
+def test_log_file_is_read_from_the_environment():
+    assert load_settings(BASE).log_file is None
+    assert load_settings({**BASE, "LOG_FILE": "logs/backend.log"}).log_file == Path("logs/backend.log")
 
 
 def test_repr_hides_secrets():

@@ -14,16 +14,18 @@ dependencies = [
     "python-dotenv (>=1.2.3,<2.0.0)",
     "uvicorn (>=0.54.0,<0.55.0)",
     "fastapi (>=0.141.1,<0.142.0)",
-    "psycopg[binary] (>=3.3.6,<4.0.0)"
+    "psycopg[binary] (>=3.3.6,<4.0.0)",
+    "psycopg-pool (>=3.3.3,<4.0.0)",
+    "tzdata (>=2026.4,<2027.0)"
 ]
 
 # Terminal commands: `name = "module.path:function"`.
 # After `poetry install`, run with `poetry run <name>` (or just `<name>` inside `poetry shell`/activated env).
 [project.scripts]
-support-agent = "customer_support_agent.main:main"
 relaypay-mcp = "customer_support_agent.mcp_server.__main__:main"
 relaypay-backend = "customer_support_agent.api.__main__:main"
 relaypay-db = "customer_support_agent.db.setup:main"
+relaypay-call = "customer_support_agent.db.inspect_call:main"
 
 [tool.poetry]
 packages = [{ include = "customer_support_agent", from = "src" }]

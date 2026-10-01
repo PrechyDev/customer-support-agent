@@ -7,7 +7,10 @@ from claude_agent_sdk import ClaudeAgentOptions
 from customer_support_agent.config import AgentSettings
 
 MCP_SERVER = "relaypay"
-KB_TOOL = f"mcp__{MCP_SERVER}__search_knowledge_base"
+TOOL_NAMES = ("search_knowledge_base", "lookup_customer", "lookup_transaction", "lookup_payout",
+              "create_support_ticket", "create_escalation", "log_conversation_event")
+ALLOWED_TOOLS = [f"mcp__{MCP_SERVER}__{name}" for name in TOOL_NAMES]
+KB_TOOL = ALLOWED_TOOLS[0]
 
 
 def build_options(settings: AgentSettings, system_prompt: str, conversation_id: str, workdir: Path) -> ClaudeAgentOptions:
@@ -16,7 +19,7 @@ def build_options(settings: AgentSettings, system_prompt: str, conversation_id: 
         model=settings.model,
         max_turns=settings.max_turns,
         tools=[],  # no built-in file, shell or web tools
-        allowed_tools=[KB_TOOL],  # our tool runs without a permission prompt
+        allowed_tools=list(ALLOWED_TOOLS),  # our tools run without a permission prompt
         permission_mode="dontAsk",  # anything not allowed is refused, never asked about
         mcp_servers={
             MCP_SERVER: {

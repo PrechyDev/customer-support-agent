@@ -17,8 +17,8 @@ DESCRIPTION = (
     "Do not use it for greetings or for account, transaction or payout lookups. "
     "Before searching, rewrite the customer's words into the knowledge base's own terms "
     "(e.g. 'my payment is stuck' -> 'payment delayed'). "
-    "Answer only from the returned text. If found is false, do not answer from general knowledge: "
-    "decline or escalate."
+    "Answer only from the returned text. If found is false, or the text doesn't directly answer the question "
+    "(even if it shares some words), treat it as not found: do not answer from general knowledge."
 )
 
 _NO_MATCH_NOTE = "No approved knowledge found. Decline or escalate; do not answer from general knowledge."
@@ -63,6 +63,11 @@ def search_knowledge_base(
     }
 
 
+def _first_sentence(text: str) -> str:
+    line = text.strip().splitlines()[0] if text.strip() else ""
+    return line.split(". ")[0][:160]
+
+
 def _log_retrieval(
     log_store: RetrievalLogStore, conversation_id: str, query: str, results: list[SearchResult], duration_ms: float
 ) -> None:
@@ -74,6 +79,7 @@ def _log_retrieval(
         titles=tuple(r.chunk.title for r in results),
         scores=tuple(round(r.score, 2) for r in results),
         duration_ms=round(duration_ms, 3),
+        summaries=tuple(_first_sentence(r.chunk.text) for r in results),
     )
     try:
         log_store.record(record)

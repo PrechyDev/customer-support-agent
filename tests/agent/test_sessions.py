@@ -26,7 +26,7 @@ class Factory:
         self.delay = delay
         self.created: dict[str, FakeClient] = {}
 
-    async def __call__(self, call_id: str) -> AgentSession:
+    async def __call__(self, call_id: str, caller=None) -> AgentSession:
         await asyncio.sleep(self.delay)
         if self.fail:
             raise RuntimeError("engine failed to start")
@@ -68,7 +68,25 @@ def test_max_turns_asks_to_rephrase_then_offers_a_specialist():
         return await ask(m, "a"), await ask(m, "a")
 
     (first, _), (second, _) = asyncio.run(scenario())
-    assert (first, second) == (fallbacks.MAX_TURNS_FIRST, fallbacks.MAX_TURNS_REPEAT)
+    assert (first, second) == (fallbacks.MAX_TURNS_FIRST, fallbacks.MAX_TURNS_REPEAT)  # no contact: dashboard
+
+    escalated = []
+
+    async def escalate(cid):
+        escalated.append(cid)
+        return True
+
+    m = SessionManager(Factory({"a": [hit, hit]}), max_sessions=10, idle_seconds=180, clock=Clock(), on_stuck=escalate)
+    (_, _), (second, _) = asyncio.run(scenario())
+    assert (second, escalated) == (fallbacks.MAX_TURNS_ESCALATED, ["a"])  # said only once the escalation exists
+
+
+def test_out_of_credit_or_bad_key_ends_the_call_at_once():
+    from claude_agent_sdk import AssistantMessage, TextBlock
+    billing = [AssistantMessage(content=[TextBlock(text="Credit balance is too low")], model="m", error="billing_error"),
+               result(is_error=True)]
+    spoken, turn = asyncio.run(ask(manager(Factory({"a": [billing]})), "a"))
+    assert (spoken, turn.ends_call, turn.api_error) == (fallbacks.TECHNICAL_GOODBYE, True, "billing_error")
 
 
 def test_technical_failure_asks_to_repeat_then_ends_the_call():
@@ -134,8 +152,8 @@ def test_messages_for_the_same_call_wait_their_turn():
 
 
 def test_idle_sessions_are_closed_and_close_all_cleans_up():
-    clock, factory = Clock(), Factory()
-    m = manager(factory, clock=clock)
+    clock, factory, abandoned = Clock(), Factory(), []
+    m = SessionManager(factory, max_sessions=10, idle_seconds=180, clock=clock, on_idle_close=abandoned.append)
 
     async def scenario():
         await ask(m, "a")
@@ -147,6 +165,7 @@ def test_idle_sessions_are_closed_and_close_all_cleans_up():
         return closed
 
     assert asyncio.run(scenario()) == ["a"]
+    assert abandoned == ["a"]  # only the idle one counts as abandoned, not those closed at shutdown
     assert all(c.disconnected for c in factory.created.values())
     assert m.active_count == 0
 

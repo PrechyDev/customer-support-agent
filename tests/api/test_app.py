@@ -7,6 +7,8 @@ from customer_support_agent.agent import fallbacks
 from customer_support_agent.api.app import create_app
 from customer_support_agent.api.auth import check_vapi_secret, describe_auth_header
 from customer_support_agent.agent.session import TextDelta, TurnResult
+from customer_support_agent.api.records import CallRecorder
+from tests.mcp_server.fake_repo import FakeRepository
 
 SECRET = "v" * 32
 BODY = {"stream": True, "call": {"id": "call-1"}, "messages": [{"role": "user", "content": "what fees?"}]}
@@ -18,17 +20,20 @@ class FakeManager:
         self.closed_all = False
         self.prewarmed = []
         self.closed = []
+        self.callers = []
 
-    async def ask(self, call_id, message):
+    async def ask(self, call_id, message, caller=None):
         self.asked.append((call_id, message))
+        self.callers.append(caller)
         yield TextDelta("Fees depend ")
         yield TextDelta("on the corridor.")
-        yield TurnResult(outcome="ok", text="Fees depend on the corridor.")
+        yield TurnResult(outcome="ok", text="Fees depend on the corridor.", answer_type="answer",
+                         sources=("fees",), kb_chunks=("fees",), tools_used=("mcp__relaypay__search_knowledge_base",))
 
     async def close_idle(self):
         return []
 
-    async def prewarm(self, call_id):
+    async def prewarm(self, call_id, caller=None):
         self.prewarmed.append(call_id)
 
     async def close(self, call_id):
@@ -64,7 +69,7 @@ def test_streams_the_agent_reply_as_sse():
 
 def test_only_a_slow_reply_hears_the_reassurance():
     class SlowManager(FakeManager):
-        async def ask(self, call_id, message):
+        async def ask(self, call_id, message, caller=None):
             await asyncio.sleep(0.3)  # e.g. a slow tool call
             async for event in super().ask(call_id, message):
                 yield event
@@ -148,3 +153,39 @@ def test_secret_check_accepts_bearer_or_raw_value():
     assert describe_auth_header(None) == "missing"
     assert describe_auth_header("Bearer abc") == "Bearer, 3 chars"
     assert describe_auth_header("abcd") == "no Bearer prefix, 4 chars"
+
+
+def test_call_is_recorded_with_the_form_each_turn_its_grounding_and_vapis_summary():
+    repo = FakeRepository()
+    manager = FakeManager()
+    form = {"name": "Ada <Obi>", "email": "ada at example dot com", "company": "Obi Ltd"}
+    started = {"message": {"type": "status-update", "status": "in-progress",
+                           "call": {"id": "call-1", "assistantOverrides": {"metadata": form}}}}
+    ended = {"message": {"type": "end-of-call-report", "call": {"id": "call-1"}, "analysis": {"summary": "Asked about fees."}}}
+    auth = {"X-RelayPay-Secret": SECRET}
+    with TestClient(create_app(manager, vapi_secret=SECRET, recorder=CallRecorder(repo, model="m"))) as c:
+        c.post("/vapi/events", json=started, headers=auth)
+        c.post("/chat/completions", json=BODY, headers=auth)
+        c.post("/vapi/events", json=ended, headers=auth)
+    clean = {"name": "Ada Obi", "email": "ada@example.com", "company": "Obi Ltd"}  # tags stripped, email normalised
+    assert manager.callers == [clean]
+    conv = repo.conversations["call-1"]
+    assert (conv["caller_name"], conv["caller_email"], conv["model"]) == ("Ada Obi", "ada@example.com", "m")
+    (cid, heard, said, answer_type, note, first_ms, total_ms), = repo.turns
+    assert (heard, said, answer_type, note) == ("what fees?", "Fees depend on the corridor.", "answer", "Grounded in: fees.")
+    assert repo.closed == [("call-1", "Asked about fees.")]
+
+
+def test_a_down_database_never_breaks_the_call():
+    with TestClient(create_app(FakeManager(), vapi_secret=SECRET, recorder=CallRecorder(FakeRepository(down=True)))) as c:
+        response = c.post("/chat/completions", json=BODY, headers={"X-RelayPay-Secret": SECRET})
+    assert contents(response.text) == "Fees depend on the corridor."
+
+
+def test_an_overlong_message_never_reaches_claude():
+    manager = FakeManager()
+    body = {**BODY, "messages": [{"role": "user", "content": "word " * 500}]}  # 2,500 characters
+    with client(manager) as c:
+        response = c.post("/chat/completions", json=body, headers={"X-RelayPay-Secret": SECRET})
+    assert contents(response.text) == fallbacks.TOO_LONG
+    assert manager.asked == []

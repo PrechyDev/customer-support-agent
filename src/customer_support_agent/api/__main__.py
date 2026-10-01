@@ -8,6 +8,7 @@ import asyncio
 import contextlib
 import logging
 import sys
+from datetime import UTC, datetime
 
 import uvicorn
 from dotenv import load_dotenv
@@ -16,20 +17,27 @@ from starlette.types import ASGIApp
 from customer_support_agent.agent.factory import make_session_factory
 from customer_support_agent.agent.sessions import SessionManager
 from customer_support_agent.api.app import create_app
+from customer_support_agent.api.records import CallRecorder
 from customer_support_agent.config import (
     ConfigError,
     load_agent_settings,
     load_backend_settings,
+    load_database_schema,
+    load_database_url,
     load_settings,
 )
+from customer_support_agent.db.repository import Repository
 from customer_support_agent.kb import KnowledgeBase, KnowledgeBaseError
 from customer_support_agent.logging_setup import configure_logging
-from customer_support_agent.mcp_server.retrieval_log import JsonlRetrievalLogStore
+from customer_support_agent.mcp_server.retrieval_log import BackgroundLogStore, SupabaseRetrievalLogStore
+from customer_support_agent.mcp_server.tools import cases
+from customer_support_agent.mcp_server.tools.common import run_tool
 from customer_support_agent.mcp_server.server import create_app as create_mcp_app
 
 logger = logging.getLogger(__name__)
 
 EXIT_CONFIG_ERROR = 2
+STUCK_REASON = "The agent couldn't complete the caller's request twice in a row."
 EXIT_STARTUP_ERROR = 1
 
 
@@ -40,6 +48,8 @@ def main() -> int:
         mcp_settings = load_settings()
         agent_settings = load_agent_settings()
         backend = load_backend_settings()
+        database_url = load_database_url()  # the backend keeps records of every call, so it's required
+        schema = load_database_schema()
     except ConfigError as exc:
         logger.error("Backend not started: %s", exc)
         return EXIT_CONFIG_ERROR
@@ -51,19 +61,34 @@ def main() -> int:
         logger.error("Backend not started: %s", exc)
         return EXIT_STARTUP_ERROR
 
-    mcp_app = create_mcp_app(kb=kb, log_store=JsonlRetrievalLogStore(mcp_settings.retrieval_log_path),
-                             token=mcp_settings.mcp_auth_token, host=mcp_settings.mcp_host)
+    repo = Repository(database_url, schema)
+    repo.open()  # connects in the background; a database that's down only makes the tools say "unavailable"
+    mcp_app = create_mcp_app(kb=kb, log_store=BackgroundLogStore(SupabaseRetrievalLogStore(repo)),
+                             token=mcp_settings.mcp_auth_token, host=mcp_settings.mcp_host, repo=repo)
+    recorder = CallRecorder(repo, model=agent_settings.model)
+
+    async def escalate_stuck(cid: str) -> bool:
+        """The agent couldn't finish the caller's request twice: hand the call to a specialist. Only works
+        if we know who to follow up with (verified record or pre-call form); otherwise False."""
+        result = await run_tool(repo, cid, "create_escalation", "automatic: agent stuck twice", "other",
+                                lambda: cases.create_escalation(repo, cid, "other", STUCK_REASON, datetime.now(UTC)),
+                                exclusive=True)
+        return "escalation_id" in result
+
     manager = SessionManager(make_session_factory(agent_settings, kb), max_sessions=agent_settings.max_sessions,
                              idle_seconds=agent_settings.session_idle_seconds,
-                             wait_seconds=agent_settings.turn_timeout_seconds)
-    app = create_app(manager, vapi_secret=backend.vapi_llm_secret)
+                             wait_seconds=agent_settings.turn_timeout_seconds, on_idle_close=recorder.abandoned,
+                             on_stuck=escalate_stuck)
+    app = create_app(manager, vapi_secret=backend.vapi_llm_secret, recorder=recorder)
 
-    logger.info("Agent model: %s", agent_settings.model)
+    logger.info("Agent model: %s; database schema: %s", agent_settings.model, schema)
     try:
         return asyncio.run(_serve(app, mcp_app, backend.host, backend.port, mcp_settings.mcp_host, mcp_settings.mcp_port))
     except KeyboardInterrupt:  # Ctrl+C: both servers have already shut down cleanly
         logger.info("Backend stopped")
         return 0
+    finally:
+        repo.close()
 
 
 async def _serve(app: ASGIApp, mcp_app: ASGIApp, host: str, port: int, mcp_host: str, mcp_port: int) -> int:

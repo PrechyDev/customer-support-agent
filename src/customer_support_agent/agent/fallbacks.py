@@ -21,7 +21,11 @@ REASSURANCE_AFTER_SECONDS = 10.0
 # The turn itself times out at AGENT_TURN_TIMEOUT_SECONDS (default 15, under Vapi's 20 s limit).
 
 MAX_TURNS_FIRST = "Sorry, I didn't manage to finish that. Could you say it another way?"
-MAX_TURNS_REPEAT = "I'm having trouble with this one. A specialist will need to help you."
+# Second time in a call: the backend escalates automatically if it knows who to follow up with.
+MAX_TURNS_ESCALATED = ("I'm having trouble with this one, so I've passed it to a specialist, "
+                       "who will follow up with you by email.")
+MAX_TURNS_REPEAT = ("I'm having trouble with this one. Please contact our support team through your "
+                    "RelayPay dashboard, and they'll help you.")
 TECHNICAL_PROBLEM = "Sorry, I had a technical problem. Could you say that again?"
 TECHNICAL_GOODBYE = (
     "I'm sorry, I'm having technical problems and can't help right now. Please try again later, "
@@ -30,5 +34,12 @@ TECHNICAL_GOODBYE = (
 BUSY_GOODBYE = f"Sorry, we're very busy right now. Please call back in a few minutes. {END_CALL_PHRASE}"
 EMPTY_REPLY = "Sorry, could you say that again?"
 
+# A caller message longer than this never reaches Claude (cost guard if the Vapi secret leaked).
+# 2,000 characters is about 350 words, over two minutes of non-stop speech: real callers never get near it.
+MAX_MESSAGE_CHARS = 2000
+TOO_LONG = "Sorry, that was a lot to take in at once. Could you tell me the main thing you need help with?"
+
 # Technical failures in a row before the call is ended (the first one asks the caller to repeat).
+# These engine errors can't be fixed by repeating, so they end the call at once.
+UNRECOVERABLE_API_ERRORS = ("billing_error", "authentication_failed")
 MAX_TECHNICAL_FAILURES = 2

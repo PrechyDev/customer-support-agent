@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import aclosing
 from dataclasses import dataclass, field, replace
 
@@ -12,7 +12,8 @@ from customer_support_agent.agent.session import AgentEvent, AgentSession, TextD
 
 logger = logging.getLogger(__name__)
 
-SessionFactory = Callable[[str], Awaitable[AgentSession]]  # creates and starts a session for a call ID
+Caller = Mapping[str, str]  # the pre-call form: name, email, company (typed, not verified)
+SessionFactory = Callable[[str, Caller | None], Awaitable[AgentSession]]  # creates and starts a call's session
 
 
 @dataclass
@@ -26,19 +27,23 @@ class _Entry:
 
 class SessionManager:
     def __init__(self, factory: SessionFactory, *, max_sessions: int, idle_seconds: float,
-                 wait_seconds: float = 15.0, clock: Callable[[], float] = time.monotonic) -> None:
+                 wait_seconds: float = 15.0, clock: Callable[[], float] = time.monotonic,
+                 on_idle_close: Callable[[str], None] | None = None,
+                 on_stuck: Callable[[str], Awaitable[bool]] | None = None) -> None:
         self._factory = factory
         self._wait_seconds = wait_seconds  # max wait for a call's previous turn or its prewarm to finish
         self._max_sessions = max_sessions
         self._idle_seconds = idle_seconds
         self._clock = clock
         self._entries: dict[str, _Entry] = {}
+        self._on_idle_close = on_idle_close  # e.g. mark the call abandoned: Vapi never said it ended
+        self._on_stuck = on_stuck  # escalates a call the agent couldn't finish twice; True if it did
 
     @property
     def active_count(self) -> int:
         return len(self._entries)
 
-    async def ask(self, conversation_id: str, message: str) -> AsyncIterator[AgentEvent]:
+    async def ask(self, conversation_id: str, message: str, caller: Caller | None = None) -> AsyncIterator[AgentEvent]:
         if not message.strip():
             yield TextDelta(fallbacks.EMPTY_REPLY)
             yield TurnResult(outcome="ok", fallback=fallbacks.EMPTY_REPLY)
@@ -71,7 +76,7 @@ class SessionManager:
                 entry.session = None
             if entry.session is None:
                 try:
-                    entry.session = await self._factory(conversation_id)
+                    entry.session = await self._factory(conversation_id, caller)
                 except Exception as exc:
                     # Retrying within the call can't fix an engine that won't start: end the call clearly.
                     logger.exception("Could not start agent session (conversation=%s)", conversation_id)
@@ -93,6 +98,8 @@ class SessionManager:
                         yield event
                         continue
                     line, ends_call = self._fallback_for(entry, event)
+                    if line == fallbacks.MAX_TURNS_REPEAT and await self._escalate_stuck(conversation_id):
+                        line = fallbacks.MAX_TURNS_ESCALATED  # only said once the escalation exists
                     if line:
                         yield TextDelta((" " if spoke else "") + line)
                     yield replace(event, fallback=line, ends_call=ends_call)
@@ -102,9 +109,23 @@ class SessionManager:
         finally:
             entry.lock.release()
 
+    async def _escalate_stuck(self, conversation_id: str) -> bool:
+        if self._on_stuck is None:
+            return False
+        try:
+            return await self._on_stuck(conversation_id)
+        except Exception:
+            logger.exception("Automatic escalation failed (conversation=%s)", conversation_id)
+            return False
+
     @staticmethod
     def _fallback_for(entry: _Entry, result: TurnResult) -> tuple[str | None, bool]:
         """Returns (line to speak, whether it ends the call)."""
+        if result.api_error in fallbacks.UNRECOVERABLE_API_ERRORS:
+            # Out of credit or a bad key: asking the caller to repeat can't fix it, so end the call now.
+            logger.error("Claude API unusable (%s): check the Anthropic credit balance and ANTHROPIC_API_KEY",
+                         result.api_error)
+            return fallbacks.TECHNICAL_GOODBYE, True
         if result.outcome in ("error", "timeout"):
             entry.technical_failures_in_row += 1
             if entry.technical_failures_in_row >= fallbacks.MAX_TECHNICAL_FAILURES:
@@ -120,7 +141,7 @@ class SessionManager:
             return fallbacks.EMPTY_REPLY, False
         return None, False
 
-    async def prewarm(self, conversation_id: str) -> None:
+    async def prewarm(self, conversation_id: str, caller: Caller | None = None) -> None:
         """Starts a call's agent session before the caller's first words (Vapi's call-started event),
         so the first answer doesn't pay the engine start. Does nothing if the call already has one or
         the concurrency cap is reached; a failure is logged and the first message simply retries."""
@@ -129,7 +150,7 @@ class SessionManager:
         entry = self._entries[conversation_id] = _Entry(last_used=self._clock())
         async with entry.lock:  # the first message waits here until the engine is ready
             try:
-                entry.session = await self._factory(conversation_id)
+                entry.session = await self._factory(conversation_id, caller)
                 logger.info("Prewarmed agent session (conversation=%s)", conversation_id)
             except Exception:
                 logger.exception("Prewarm failed; the first message will retry (conversation=%s)", conversation_id)
@@ -148,6 +169,8 @@ class SessionManager:
         for cid in idle:
             logger.info("Closing idle agent session (conversation=%s)", cid)
             await self.close(cid)
+            if self._on_idle_close is not None:
+                self._on_idle_close(cid)
         return idle
 
     async def close_all(self) -> None:

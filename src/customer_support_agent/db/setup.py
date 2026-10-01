@@ -1,5 +1,8 @@
 """Create the tables and load the seed data: `poetry run relaypay-db`.
 
+DATABASE_SCHEMA picks the set of tables: "public" (default, the real records) or e.g. "test", a separate
+copy with its own ticket numbers for throwaway test runs: `DATABASE_SCHEMA=test poetry run relaypay-db`.
+
 Safe to run more than once: the schema uses "create if not exists", and seed rows are upserted
 (insert, or update if the ID already exists), so a re-run changes nothing and never duplicates.
 """
@@ -11,7 +14,7 @@ from pathlib import Path
 import psycopg
 from dotenv import load_dotenv
 
-from customer_support_agent.config import ConfigError, load_database_url
+from customer_support_agent.config import ConfigError, load_database_schema, load_database_url
 from customer_support_agent.db.seed_data import SeedData, SeedError, load_seed
 from customer_support_agent.logging_setup import configure_logging
 
@@ -56,6 +59,7 @@ def main() -> int:
     configure_logging()
     try:
         url = load_database_url()
+        schema = load_database_schema()
         seed = load_seed()  # checked before connecting, so a bad file never half-loads the database
     except (ConfigError, SeedError) as exc:
         logger.error("Database setup not started: %s", exc)
@@ -63,6 +67,8 @@ def main() -> int:
 
     try:
         with psycopg.connect(url, connect_timeout=10) as conn:  # one transaction: all or nothing
+            conn.execute(f"create schema if not exists {schema}")  # validated name, safe to inline
+            conn.execute(f"set search_path to {schema}")
             applied = apply_migrations(conn)
             load(conn, seed)
             loaded = counts(conn)
@@ -71,7 +77,7 @@ def main() -> int:
         logger.error("Database setup failed and was rolled back: %s", exc)
         return EXIT_FAILED
 
-    logger.info("Applied migrations: %s", ", ".join(applied))
+    logger.info("Applied migrations to schema '%s': %s", schema, ", ".join(applied))
     logger.info("Rows now in the database: %s", loaded)
     return 0
 

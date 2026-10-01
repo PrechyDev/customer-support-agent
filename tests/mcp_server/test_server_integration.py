@@ -63,7 +63,9 @@ def test_authorized_client_lists_and_calls_the_tool(server):
         return tools, result
 
     tools, result = asyncio.run(session(url, {**AUTH, "X-Conversation-Id": "call-abc"}, work))
-    assert [t.name for t in tools.tools] == ["search_knowledge_base"]
+    assert sorted(t.name for t in tools.tools) == sorted([
+        "search_knowledge_base", "lookup_customer", "lookup_transaction", "lookup_payout",
+        "create_support_ticket", "create_escalation", "log_conversation_event"])
     assert result.structured_content["results"][0]["chunk_id"] == "how-does-relaypay-charge-fees"
     assert store.records[-1].conversation_id == "call-abc"
 

@@ -16,7 +16,9 @@ def make(tmp_path):
 def test_agent_is_locked_down(tmp_path):
     o = make(tmp_path)
     assert o.tools == []  # no built-in file, shell or web tools
-    assert o.allowed_tools == ["mcp__relaypay__search_knowledge_base"]
+    assert o.allowed_tools == [f"mcp__relaypay__{t}" for t in (
+        "search_knowledge_base", "lookup_customer", "lookup_transaction", "lookup_payout",
+        "create_support_ticket", "create_escalation", "log_conversation_event")]  # ours only
     assert o.permission_mode == "dontAsk"
     assert o.setting_sources == []  # no ~/.claude settings, hooks, plugins or CLAUDE.md
     assert o.strict_mcp_config is True  # no other MCP servers
