@@ -38,17 +38,31 @@ LOOKUP_PAYOUT = (
 )
 
 
-def _verified_summary(c: dict) -> dict[str, Any]:
-    return {"found": True, "customer_id": c["customer_id"], "company_name": c["company_name"], "plan": c["plan"],
-            "account_status": c["account_status"], "kyc_status": c["kyc_status"],
-            "support_notes": c["support_notes"]}  # for deciding only: the prompt forbids saying it
+RESTRICTED_LINE = ("Your account is restricted at the moment, and a specialist needs to go through it with you, "
+                   "so I've passed it to them.")
+
+
+def _verified_summary(repo: Any, cid: str, c: dict, now: datetime | None) -> dict[str, Any]:
+    """Plan and statuses only. support_notes never reach the model (changed 01-10: an eval run heard Bex repeat
+    CUS-1003's "under compliance review"); what they mean is decided here instead. A restricted account, or one
+    whose verification needs review, always goes to a specialist, so the lookup creates the escalation itself."""
+    summary = {"found": True, "customer_id": c["customer_id"], "company_name": c["company_name"], "plan": c["plan"],
+               "account_status": c["account_status"], "kyc_status": c["kyc_status"]}
+    if now is None or not (c["account_status"] == "restricted" or c["kyc_status"] == "review required"):
+        return summary
+    made = cases.create_escalation(repo, cid, "account", "Account restricted: the customer needs a specialist", now)
+    if "escalation_id" not in made:
+        return {**summary, "next": "Say the account needs a specialist, then: " + made.get("hint", "offer one.")}
+    return {**summary, "say": RESTRICTED_LINE, "escalation_id": made["escalation_id"], "ticket_id": made["ticket_id"],
+            "next": "Say the plan if they asked for it, then the 'say' line, then ask whether they'd like a call back "
+                    "or an email. You don't know why it's restricted: if asked, the specialist will go through it."}
 
 
 def lookup_customer(repo: Any, cid: str, email: str | None, company_name: str | None,
-                    email_confirmed: bool = False) -> dict[str, Any]:
+                    email_confirmed: bool = False, now: datetime | None = None) -> dict[str, Any]:
     conversation = repo.ensure_conversation(cid) or {}
     if conversation.get("verified_customer_id"):  # already verified this call: no new attempt
-        return _verified_summary(repo.customer(conversation["verified_customer_id"]))
+        return _verified_summary(repo, cid, repo.customer(conversation["verified_customer_id"]), now)
     if (conversation.get("verification_attempts") or 0) >= MAX_VERIFICATION_ATTEMPTS:
         return error("limit_reached", "Too many attempts. Don't try again: escalate as 'identity not verified'.")
 
@@ -58,7 +72,7 @@ def lookup_customer(repo: Any, cid: str, email: str | None, company_name: str | 
     wanted_email, wanted_company = normalise_email(email), normalise_company(company_name)
     if not wanted_email or not wanted_company:
         return error("invalid_input", "Need both a valid email and the company name. Ask for whichever is missing.")
-    heard = heard_text(cid, wanted_email, spoken_email(wanted_email))
+    heard = heard_text(cid, spoken_email(wanted_email))  # only the spelled read-back counts (see spoken_email)
     if email_was_spoken and not confirmed(cid, "email", wanted_email, email_confirmed, heard):  # misheard: no attempt
         return {"error": "confirm_email", "say": f"Just to confirm, that's {spoken_email(wanted_email)}. Is that right?",
                 "hint": "Say the line; if they agree, call again with email_confirmed true. If not, ask them to "
@@ -82,7 +96,7 @@ def lookup_customer(repo: Any, cid: str, email: str | None, company_name: str | 
                 if left > 0
                 else "Don't try again: escalate as 'identity not verified'."}
     repo.mark_verified(cid, customer["customer_id"])
-    return _verified_summary(customer)
+    return _verified_summary(repo, cid, customer, now)
 
 
 def _status_result(kind: str, ref: str, record: dict, due_field: str, today: date) -> dict[str, Any]:

@@ -25,3 +25,4 @@ def test_thinking_sounds_alone_are_not_a_turn():
     assert is_filler("Um, I.") and is_filler("uh, so") and is_filler("Hmm.")
     assert not is_filler("Okay.") and not is_filler("No") and not is_filler("Um, check TXN 9001")
     assert not is_filler("")
+    assert not is_filler("Uh, 081-4346-3800.") and is_filler("Oh.")  # digits are never a pause

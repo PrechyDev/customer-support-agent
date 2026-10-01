@@ -3,7 +3,8 @@ from datetime import UTC, date, datetime
 import pytest
 
 from customer_support_agent.domain.callbacks import CallbackError, callback_window
-from customer_support_agent.domain.normalise import mask_email, normalise_company, normalise_email, parse_reference
+from customer_support_agent.domain.normalise import (mask_email, normalise_company, normalise_email, parse_reference,
+                                                     spoken_email)
 from customer_support_agent.domain.status import caller_status
 
 TODAY = date(2026, 10, 1)  # a Thursday
@@ -33,6 +34,8 @@ def test_status_lines_say_which_payment_or_payout():
 
 def test_spoken_input_is_normalised():
     assert normalise_email("Amara at Lagos Ledger dot example") == "amara@lagosledger.example"
+    assert spoken_email("amara@lagos-ledger.example") == "amara at L-A-G-O-S-dash-L-E-D-G-E-R dot example"
+    assert spoken_email("ada.obi@gmail.com") == "ada dot obi at gmail dot com"  # well-known domains aren't spelled
     assert normalise_email("not an email") is None
     assert normalise_company("Lagos Ledger") == normalise_company("LagosLedger") == "lagosledger"
     assert parse_reference("T X N nine zero zero one") == "TXN-9001"

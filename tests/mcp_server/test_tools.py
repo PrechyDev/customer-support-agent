@@ -27,22 +27,43 @@ NOW = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)  # Thursday
 def test_verification_checks_both_fields_and_caps_attempts():
     repo = FakeRepository()
     said = accounts.lookup_customer(repo, "c1", "amara at L-A-G-O-S ledger dot example", "AccraStack")
-    assert (said["error"], said["say"]) == ("confirm_email", "Just to confirm, that's amara at lagosledger dot example. Is that right?")
+    assert (said["error"], said["say"]) == ("confirm_email", "Just to confirm, that's amara at L-A-G-O-S-L-E-D-G-E-R dot example. Is that right?")
     assert repo.conversations["c1"]["verification_attempts"] == 0  # not confirmed yet: no attempt used
     wrong = accounts.lookup_customer(repo, "c1", "amara at lagosledger dot example", "AccraStack", email_confirmed=True)
     assert (wrong["found"], wrong["attempts_left"]) == (False, 1) and "letter by letter" in wrong["hint"]
-    spoken.remember("c1", "Just to confirm, that's amara at lagosledger dot example. Is that right?")
+    spoken.remember("c1", "Just to confirm, that's amara at L-A-G-O-S-L-E-D-G-E-R dot example. Is that right?")
     ok = accounts.lookup_customer(repo, "c1", "amara at lagosledger dot example", "Lagos Ledger", email_confirmed=True)
     assert (ok["found"], ok["plan"], repo.conversations["c1"]["verified_customer_id"]) == (True, "Growth", "CUS-1001")
-    assert "contact_email" not in ok  # details held on file never reach the model
+    assert "contact_email" not in ok and "support_notes" not in ok  # details held on file never reach the model
+
+
+def test_a_restricted_account_goes_to_a_specialist_and_its_notes_never_reach_the_model():
+    repo = FakeRepository()
+    spoken.remember("r1", "Just to confirm, that's efua at A-C-C-R-A-S-T-A-C-K dot example. Is that right?")
+    efua = accounts.lookup_customer(repo, "r1", "efua@accrastack.example", "AccraStack", email_confirmed=True, now=NOW)
+    assert efua["account_status"] == "restricted" and "support_notes" not in efua  # "under compliance review"
+    assert efua["say"] == accounts.RESTRICTED_LINE and efua["escalation_id"] and efua["ticket_id"]
+    again = accounts.lookup_customer(repo, "r1", None, None, now=NOW)  # asked again later in the call
+    assert again["escalation_id"] == efua["escalation_id"] and len(repo.escalation_rows) == 1
+
+    active = FakeRepository()  # an active account: plan and status only, nothing escalated
+    spoken.remember("r2", "Just to confirm, that's amara at L-A-G-O-S-L-E-D-G-E-R dot example. Is that right?")
+    amara = accounts.lookup_customer(active, "r2", "amara@lagosledger.example", "LagosLedger", email_confirmed=True,
+                                     now=NOW)
+    assert amara["found"] and "say" not in amara and not active.escalation_rows
 
     repo2 = FakeRepository()
-    spoken.remember("c2", "Just to confirm, that's efua at accrastack dot example?")  # Bex read it back herself
+    spoken.remember("c2", "Just to confirm, that's efua at A-C-C-R-A-S-T-A-C-K dot example?")  # Bex read it back herself
     for company in ("Wrong Co", "Wrong Co", "Other Co"):  # the exact repeat doesn't use up the retry
         accounts.lookup_customer(repo2, "c2", "efua@accrastack.example", company, email_confirmed=True)
     assert accounts.lookup_customer(repo2, "c2", "efua@accrastack.example", "AccraStack",
                                     email_confirmed=True)["error"] == "limit_reached"
     assert [e[1] for e in repo2.events] == ["verification_failed"]  # logged by the tool, once
+
+    plain = FakeRepository()  # Bex said it unspelled herself: "lagossledger" sounds like "lagos ledger", so no
+    spoken.remember("c9", "That's efua at accrastack dot example, right?")
+    again = accounts.lookup_customer(plain, "c9", "efua@accrastack.example", "AccraStack", email_confirmed=True)
+    assert again["error"] == "confirm_email" and "A-C-C-R-A-S-T-A-C-K" in again["say"]
 
     form = FakeRepository()
     form.ensure_conversation("c3", caller={"email": "amara@lagosledger.example"})
@@ -70,7 +91,7 @@ def test_guessing_references_stops_lookups_and_other_customers_references_are_fl
     assert [e[1] for e in repo.events] == ["sensitive_request"]  # "possible reference guessing", logged once
 
     verified = FakeRepository()
-    spoken.remember("c2", "That's efua at accrastack dot example, right?")
+    spoken.remember("c2", "That's efua at A-C-C-R-A-S-T-A-C-K dot example, right?")
     accounts.lookup_customer(verified, "c2", "efua@accrastack.example", "AccraStack", email_confirmed=True)  # CUS-1003
     assert accounts.lookup_transaction(verified, "c2", "TXN-9001", TODAY)["found"] is True  # status only, as anyone
     assert [e[2] for e in verified.events] == ["Verified caller looked up another customer's reference"]
@@ -94,7 +115,7 @@ def test_tickets_need_someone_to_follow_up_and_never_duplicate():
 
 def test_escalation_uses_verified_contact_links_a_ticket_and_logs_an_event():
     repo = FakeRepository()
-    spoken.remember("c1", "That's efua at accrastack dot example, right?")
+    spoken.remember("c1", "That's efua at A-C-C-R-A-S-T-A-C-K dot example, right?")
     accounts.lookup_customer(repo, "c1", "efua@accrastack.example", "AccraStack", email_confirmed=True)
     result = cases.create_escalation(repo, "c1", "account", "Account restricted", NOW)
     escalation = repo.escalation_rows[0]
@@ -154,7 +175,7 @@ def test_escalation_contact_falls_back_to_the_form_then_what_was_said():
     spoken = FakeRepository()
     assert cases.create_escalation(spoken, "c2", "dispute", "Refund", NOW)["error"] == "needs_contact"
     said = cases.create_escalation(spoken, "c2", "dispute", "Refund", NOW, "Ada", "ada at example dot com")
-    assert (said["error"], said["say"]) == ("confirm_email", "Just to confirm, that's ada at example dot com. Is that right?")
+    assert (said["error"], said["say"]) == ("confirm_email", "Just to confirm, that's ada at E-X-A-M-P-L-E dot com. Is that right?")
     assert not spoken.escalation_rows
     assert cases.create_escalation(spoken, "c2", "dispute", "Refund", NOW, "Ada", "ada at example dot com",
                                    email_confirmed=True)["created"]

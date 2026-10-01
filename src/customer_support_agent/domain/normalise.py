@@ -27,9 +27,22 @@ def normalise_email(raw: str | None) -> str | None:
     return text if _EMAIL.match(text) else None
 
 
+_COMMON_DOMAINS = frozenset({"gmail", "googlemail", "yahoo", "outlook", "hotmail", "live", "icloud", "me", "aol",
+                             "proton", "protonmail"})
+
+
 def spoken_email(email: str) -> str:
-    """'amara@lagosledger.example' -> 'amara at lagosledger dot example', for reading back."""
-    return email.replace("@", " at ").replace(".", " dot ")
+    """'amara@lagosledger.example' -> 'amara at L-A-G-O-S-L-E-D-G-E-R dot example', for reading back.
+
+    The domain is spelled (except well-known ones like gmail.com): "lagossledger" and "lagos ledger" sound the
+    same, so a plain read-back let a typo through in a voice test (01-10). Spelling it is how banks read emails back.
+    """
+    user, _, domain = email.partition("@")
+    labels = domain.split(".")
+    if not domain or labels[0] in _COMMON_DOMAINS:
+        return email.replace("@", " at ").replace(".", " dot ")
+    spelled = ["-".join("dash" if c == "-" else c.upper() for c in label) for label in labels[:-1]]
+    return f"{user.replace('.', ' dot ')} at {' dot '.join([*spelled, labels[-1]])}"
 
 
 def normalise_company(raw: str | None) -> str:

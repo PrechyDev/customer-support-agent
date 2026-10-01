@@ -30,6 +30,18 @@ COOKIE = "rp_console"
 CSRF_HEADER, CSRF_VALUE = "x-requested-with", "relaypay-console"
 CONSOLE_PAGE = Path(__file__).resolve().parent.parent / "web" / "static" / "console" / "index.html"
 NOTE_MAX, RESOLVE_MAX, MAX_RANGE_DAYS = 1000, 500, 366
+PAGE_SIZE, MAX_PAGE_SIZE = 25, 100
+
+
+def paging(page: str, page_size: str) -> tuple[int, int]:
+    """(page, page_size) from the query string; 400 unless page >= 1 and 1 <= page_size <= 100."""
+    try:
+        number, size = int(page), int(page_size)
+    except ValueError:
+        number = size = 0
+    if number < 1 or not 1 <= size <= MAX_PAGE_SIZE:
+        _fail(400, "invalid_input", f"page must be 1 or more and page_size 1 to {MAX_PAGE_SIZE}.")
+    return number, size
 
 
 class ConsoleError(Exception):
@@ -262,18 +274,17 @@ def console_router(store: ConsoleStore | None, settings: ConsoleSettings,
 
     # --- cases -----------------------------------------------------------------------------
     @router.get("/cases")
-    async def cases(request: Request, type: str = "", filter: str = "open"):
-        """One list of cases: escalations and tickets together, unless a type is given."""
+    async def cases(request: Request, type: str = "", filter: str = "open", page: str = "1",
+                    page_size: str = str(PAGE_SIZE)):
+        """One list of cases: escalations and tickets together, unless a type is given. One page at a time."""
         actor = await signed_in(request)
         if (type and type not in CASE_TABLES) or filter not in ("open", "mine", "unassigned", "resolved"):
             _fail(400, "invalid_input", "Unknown case type or filter.")
-        rows = await db(store.cases, case_type=type or None, limit=500)
-        groups = {"open": [r for r in rows if r["status"] != "closed"],
-                  "mine": [r for r in rows if r["status"] != "closed" and r["owner_id"] == actor["member_id"]],
-                  "unassigned": [r for r in rows if r["status"] != "closed" and not r["owner_id"]],
-                  "resolved": [r for r in rows if r["status"] == "closed"]}
-        return {"cases": [views.case_row(r) for r in groups[filter]],
-                "counts": {name: len(group) for name, group in groups.items()}}
+        number, size = paging(page, page_size)
+        rows, total = await db(store.case_page, filter, actor["member_id"], type or None, number, size)
+        counts = await db(store.case_counts, actor["member_id"], type or None)
+        return {"cases": [views.case_row(r) for r in rows], "counts": counts,
+                "pagination": {"page": number, "page_size": size, "total": total}}
 
     async def load_case(case_type: str, case_id: str) -> dict:
         if case_type not in CASE_TABLES:
@@ -408,13 +419,18 @@ def console_router(store: ConsoleStore | None, settings: ConsoleSettings,
 
     # --- conversations, customers ---------------------------------------------------------
     @router.get("/conversations")
-    async def conversations(request: Request, search: str = "", outcome: str = "", limit: int = 50):
+    async def conversations(request: Request, search: str = "", outcome: str = "", page: str = "1",
+                            page_size: str = str(PAGE_SIZE)):
         await signed_in(request)
-        rows = [views.conversation_row(r) for r in await db(store.conversations, search=search.strip()[:100] or None)]
-        counts = {"all": len(rows), **{name: sum(r["outcome"] == name for r in rows) for name in views.OUTCOMES}}
-        if outcome:
-            rows = [r for r in rows if r["outcome"] == outcome]
-        return {"conversations": rows[:max(1, min(limit, 100))], "counts": counts}
+        if outcome and outcome not in views.OUTCOMES:
+            _fail(400, "invalid_input", "Unknown outcome.")
+        number, size = paging(page, page_size)
+        query = search.strip()[:100] or None
+        rows, total = await db(store.conversation_page, query, outcome or None, number, size)
+        found = await db(store.conversation_counts, query)
+        counts = {"all": sum(found.values()), **{name: found.get(name, 0) for name in views.OUTCOMES}}
+        return {"conversations": [views.conversation_row(r) for r in rows], "counts": counts,
+                "pagination": {"page": number, "page_size": size, "total": total}}
 
     @router.get("/conversations/{cid}")
     async def conversation(request: Request, cid: str):
@@ -432,9 +448,12 @@ def console_router(store: ConsoleStore | None, settings: ConsoleSettings,
                 "searches": [{"query": s["query"], "chunks": list(s["titles"] or [])} for s in await db(store.searches, cid)]}
 
     @router.get("/customers")
-    async def customers(request: Request, search: str = ""):
+    async def customers(request: Request, search: str = "", page: str = "1", page_size: str = str(PAGE_SIZE)):
         await signed_in(request)
-        return {"customers": await db(store.customers, search.strip()[:100] or None)}
+        number, size = paging(page, page_size)
+        rows, total = await db(store.customer_page, search.strip()[:100] or None, number, size)
+        return {"customers": [{k: v for k, v in r.items() if k != "total_rows"} for r in rows],
+                "pagination": {"page": number, "page_size": size, "total": total}}
 
     @router.get("/customers/{customer_id}")
     async def customer(request: Request, customer_id: str):

@@ -36,13 +36,15 @@ _CALLER_RULES = (
 
 # Sounds people make while thinking. A message made only of these isn't a turn: Vapi sent it because the caller
 # paused ("Um, I."). "okay", "yes", "no" and "thanks" are real replies and are NOT in this list.
-_FILLERS = frozenset({"um", "umm", "uh", "uhh", "er", "erm", "hmm", "hm", "mm", "mmm", "ah", "eh", "i", "so",
+_FILLERS = frozenset({"um", "umm", "uh", "uhh", "er", "erm", "hmm", "hm", "mm", "mmm", "ah", "eh", "oh", "i", "so",
                       "well", "like", "and", "but"})
 MAX_FILLER_WORDS = 4
 
 
 def is_filler(text: str) -> bool:
     """True when the caller only made thinking sounds ("Um, I.", "uh, so"): nothing to answer yet."""
+    if any(ch.isdigit() for ch in text or ""):  # "Uh, 081-4346-3800" is a phone number, not a pause
+        return False
     words = re.findall(r"[a-z']+", (text or "").lower())
     return 0 < len(words) <= MAX_FILLER_WORDS and all(word in _FILLERS for word in words)
 

@@ -14,6 +14,7 @@ from customer_support_agent.domain.normalise import (
     mask_email,
     normalise_email,
     normalise_phone,
+    spoken_email,
     parse_reference,
     spoken_phone,
 )
@@ -153,10 +154,6 @@ def _call_request(cid: str, conversation: dict, place: str | None, day: str | No
     return {**values, "callback_phone": number, "_spoken": spoken}, None
 
 
-def _spoken_email(email: str) -> str:
-    return email.replace("@", " at ").replace(".", " dot ")
-
-
 def _follow_up(method: str, spoken: str | None) -> str:
     if method == "call" and spoken:
         return f"Lovely, a specialist will call you on {spoken}."
@@ -214,9 +211,9 @@ def create_escalation(repo: Any, cid: str, category: str, reason: str, now: date
         return error("needs_contact", "Ask for the caller's name and email, then call again with user_name and "
                                       "user_email.")
     email_was_spoken = not (conversation.get("verified_customer_id") or conversation.get("caller_email"))
-    heard = heard_text(cid, email, _spoken_email(email))
+    heard = heard_text(cid, spoken_email(email))  # only the spelled read-back counts (see spoken_email)
     if email_was_spoken and not confirmed(cid, "email", email, email_confirmed, heard):  # misheard = nobody follows up
-        return {"error": "confirm_email", "say": f"Just to confirm, that's {_spoken_email(email)}. Is that right?",
+        return {"error": "confirm_email", "say": f"Just to confirm, that's {spoken_email(email)}. Is that right?",
                 "hint": "Read the email back; if they confirm, call again with email_confirmed true."}
     if len(escalations) >= MAX_ESCALATIONS:
         return error("limit_reached", "No more escalations on this call. Tell the caller the specialists already "

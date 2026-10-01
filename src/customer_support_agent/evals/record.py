@@ -44,7 +44,7 @@ def load_record(repo: Any, cid: str) -> CallRecord:
         turns=rows("select user_transcript, assistant_response, answer_type, confidence_note from conversation_turns "
                    "where conversation_id = %s order by created_at"),
         tools=tuple(r["tool_name"] for r in rows("select tool_name from tool_calls where conversation_id = %s "
-                                                  "order by created_at")),
+                                                  "and status = 'ok' order by created_at")),  # a refused call did nothing
         searches=len(rows("select 1 from retrieval_logs where conversation_id = %s")),
         tickets=rows("select ticket_id, category, priority, summary from support_tickets where conversation_id = %s"),
         escalations=rows("select e.escalation_id, e.ticket_id, e.reason, e.verified, t.summary as ticket_summary "

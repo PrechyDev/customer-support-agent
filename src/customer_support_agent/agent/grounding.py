@@ -31,13 +31,15 @@ def _short(tool: str) -> str:
 
 
 def _declined_after_empty_search(result: TurnResult, answer_type: str, tools: list[str]) -> bool:
-    """An answer only counts with the stricter "I don't have information" wording, so a made-up answer that
-    happens to mention a specialist stays flagged NOT GROUNDED."""
-    if "search_knowledge_base" not in tools or result.kb_chunks or result.sources:
+    """A search, nothing cited, and a reply that says it doesn't have the information. The plain "I don't have
+    information" wording counts even if the search returned something unrelated; the looser wording (which
+    includes offering a specialist) only after a search that found nothing, so a made-up answer that happens
+    to mention a specialist stays flagged NOT GROUNDED."""
+    if "search_knowledge_base" not in tools or result.sources or answer_type not in ("answer", "clarify"):
         return False
-    if answer_type == "clarify":
-        return bool(_NO_ANSWER.search(result.text))
-    return answer_type == "answer" and bool(_NO_INFO.search(result.text))
+    if _NO_INFO.search(result.text):
+        return True
+    return answer_type == "clarify" and not result.kb_chunks and bool(_NO_ANSWER.search(result.text))
 
 
 def assess(result: TurnResult | None, sent_text: str) -> Assessment:

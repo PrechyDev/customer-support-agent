@@ -77,7 +77,7 @@ it is shown once, never stored in plain text.
 ```
 Support: `needs_attention` holds only their own and unassigned cases.
 
-## Pagination (added 01-10-2026; backend to build)
+## Pagination (added 01-10-2026; built and tested)
 
 `GET /conversations`, `GET /cases` and `GET /customers` take `page` (1-based, default 1) and `page_size`
 (default 25, max 100). The database returns only that page (LIMIT/OFFSET).

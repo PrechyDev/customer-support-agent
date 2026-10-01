@@ -44,12 +44,28 @@ _MAX_QUESTION_WORDS = 20
 # The word Vapi hangs up on (fallbacks.END_CALL_PHRASE / endCallPhrases). The model's own words must
 # never contain it: only the backend's fixed ending lines do.
 _HANGUP_PHRASES = ((re.compile(r"\bgood-?bye\b", re.IGNORECASE), "bye for now"),)
+# Only thanks and farewells: when the call is ending, the backend's fixed closing line already says these.
+_PLEASANTRY = re.compile(r"(you're|you are) (very )?welcome|(thank you|thanks)( (so|very) much)?( for \w+( \w+)?)?"
+                         r"|good-?bye|bye( for now)?|take care|have a (great|good|lovely|nice) (day|evening|one)"
+                         r"|my pleasure|glad (i|to) (could )?help|cheers|all the best", re.IGNORECASE)
 
 
 def without_hangup_phrases(text: str) -> str:
     for pattern, replacement in _HANGUP_PHRASES:
-        text = pattern.sub(replacement, text)
+        text = pattern.sub(lambda m, r=replacement: _match_case(text, m, r), text)
     return text.strip()
+
+
+def _match_case(text: str, match: re.Match, replacement: str) -> str:
+    """Capitalise the replacement when it starts a sentence ("Bye for now!", not "bye for now!")."""
+    before = text[: match.start()].rstrip()
+    return replacement[0].upper() + replacement[1:] if not before or before[-1] in ".!?" else replacement
+
+
+def only_pleasantries(text: str) -> bool:
+    """True if every sentence is thanks or a goodbye ("You're welcome. Goodbye!")."""
+    sentences = [s.strip(" ,") for s in re.split(r"[.!?]+", text or "") if s.strip(" ,")]
+    return bool(sentences) and all(_PLEASANTRY.fullmatch(s) for s in sentences)
 
 
 def say_text(raw: str, final: bool) -> str:
@@ -204,7 +220,13 @@ class _Turn:
         if _END_CALL in self._raw:
             self.end_requested = True
         spoken = say_text(self._raw, final=True)
-        question = trailing_question(self._raw) if spoken and not self.end_requested else ""
+        if self.end_requested and only_pleasantries(spoken[self._sent:]):
+            # "You're welcome. Goodbye!" then the fixed closing line was two goodbyes (a voice test, 01-10)
+            logger.info("Dropped the model's own goodbye: the closing line covers it (conversation=%s)",
+                        self._conversation_id)
+            spoken = spoken[: self._sent]
+        asks_already = spoken.rstrip().endswith("?")  # "...for me?" + "What's the reference?" was two questions
+        question = trailing_question(self._raw) if spoken and not self.end_requested and not asks_already else ""
         if question:
             logger.info("Kept a closing question written after </say> (conversation=%s)", self._conversation_id)
             spoken = f"{spoken} {question}"

@@ -60,7 +60,8 @@ def case_row(row: dict) -> dict:
             "customer_id": row.get("customer_id"), "company": row.get("company"),
             "reference": row.get("reference") or None, "callback": callback(row),
             "contact_method": row.get("contact_method"), "created_at": iso(row["created_at"]),
-            "resolved_at": iso(row.get("resolved_at")), "conversation_id": row.get("conversation_id")}
+            "resolved_at": iso(row.get("resolved_at")), "conversation_id": row.get("conversation_id"),
+            "ticket_id": row.get("ticket_id")}  # an escalation's linked ticket; a ticket's own ID
 
 
 def member_view(row: dict) -> dict:

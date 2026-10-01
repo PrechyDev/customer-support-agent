@@ -82,6 +82,21 @@ def test_end_call_signal_is_passed_on():
     assert (turn.end_requested, turn.text) == (True, "")
 
 
+def test_a_call_ending_on_thanks_gets_one_goodbye_only():
+    """"No, thank you" in a voice test: the model's "You're welcome. Goodbye!" plus the closing line was two goodbyes."""
+    client = FakeClient([[*reply("<say>You're welcome. Goodbye!</say><end_call/>", say=False), result()]])
+    turn = collect(AgentSession(client, "call-1", turn_timeout_seconds=5))[-1]
+    assert (turn.end_requested, turn.text) == (True, "")  # the backend's closing line says it once
+    real = FakeClient([[*reply("<say>Your ticket is T-1050. Goodbye!</say><end_call/>", say=False), result()]])
+    assert collect(AgentSession(real, "call-1", turn_timeout_seconds=5))[-1].text == "Your ticket is T-1050. Bye for now!"
+
+
+def test_no_second_question_when_the_reply_already_asks_one():
+    raw = "<say>Do you have the reference for me?</say> What's the transaction reference?"
+    client = FakeClient([[*reply(raw, say=False), result()]])
+    assert spoken(collect(AgentSession(client, "c", turn_timeout_seconds=5))) == "Do you have the reference for me?"
+
+
 def test_without_stream_events_full_messages_are_used_the_same_way():
     client = FakeClient([[assistant_only("Let me check.", tool=KB_TOOL), assistant_only("Hello, how can I help?"), result()]])
     assert spoken(collect(AgentSession(client, "call-1", turn_timeout_seconds=5))) == "Hello, how can I help?"

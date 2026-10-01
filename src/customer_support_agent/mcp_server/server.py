@@ -55,7 +55,7 @@ def create_mcp_server(kb: KnowledgeBase, log_store: RetrievalLogStore, repo: Any
                               email_confirmed: bool = False) -> dict[str, Any]:
         cid = ready(ctx)
         return await run_tool(repo, cid, "lookup_customer", "verify caller", f"email={mask_email(email)} company={company_name}",
-                              lambda: accounts.lookup_customer(repo, cid, email, company_name, email_confirmed),
+                              lambda: accounts.lookup_customer(repo, cid, email, company_name, email_confirmed, now()),
                               exclusive=True)
 
     @server.tool(description=accounts.LOOKUP_TRANSACTION)

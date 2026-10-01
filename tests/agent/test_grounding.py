@@ -36,3 +36,6 @@ def test_other_paths_and_backend_lines_are_labelled_without_a_grounding_verdict(
     assert (mislabelled.answer_type, mislabelled.grounded) == ("decline", None)
     made_up = assess(turn(answer_type="answer", tools_used=(KB,), text="Yes, our app is free. A specialist can help."), "")
     assert made_up.grounded is False  # an invented answer stays flagged
+    unrelated = assess(turn(answer_type="clarify", tools_used=(KB,), kb_chunks=("fees",),
+                            text="I don't have information about a mobile app. Anything else?"), "")
+    assert unrelated.answer_type == "decline"  # the search found something, but not about this

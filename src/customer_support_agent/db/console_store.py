@@ -49,6 +49,18 @@ select c.conversation_id, c.started_at, c.ended_at, c.final_status, c.summary, c
 from conversations c left join customers cu on cu.customer_id = c.verified_customer_id
 """
 
+# The same rule as console.views.outcome, in SQL, so a list can be filtered and paged by outcome in the
+# database (a test checks the two agree).
+_OUTCOME = ("case when has_escalation then 'handed_to_specialist' when has_ticket then 'ticket_created' "
+            "when final_status = 'abandoned' then 'caller_hung_up' when has_decline then 'could_not_answer' "
+            "else 'answered' end")
+_CASE_FILTERS = {"open": "status <> 'closed'", "mine": "status <> 'closed' and owner_id = %s",
+                 "unassigned": "status <> 'closed' and owner_id is null", "resolved": "status = 'closed'"}
+
+
+def _offset(page: int, page_size: int) -> int:
+    return (page - 1) * page_size
+
 
 class ConsoleStore:
     def __init__(self, repo: Repository) -> None:
@@ -56,6 +68,17 @@ class ConsoleStore:
 
     def _run(self, sql: str, params: tuple = (), fetch: str = "none") -> Any:
         return self._repo._run(sql, params, fetch)
+
+    def _page(self, base: str, params: list, order: str, page: int, page_size: int) -> tuple[list[dict], int]:
+        """One page of `base` (a select with its own where) and the total it matches, in one round trip.
+        A page past the end has no rows to carry the total, so that case counts separately."""
+        rows = self._run(f"select *, count(*) over () as total_rows from ({base}) x order by {order} "
+                         "limit %s offset %s", (*params, page_size, _offset(page, page_size)), "all")
+        if rows:
+            return rows, rows[0]["total_rows"]
+        if page == 1:
+            return [], 0
+        return [], self._run(f"select count(*) as n from ({base}) x", tuple(params), "one")["n"]
 
     # --- team members ----------------------------------------------------------------------
     def member(self, member_id: str) -> dict | None:
@@ -130,6 +153,25 @@ class ConsoleStore:
         sql = f"select * from ({_CASES}) cases" + (f" where {' and '.join(where)}" if where else "")
         return self._run(sql + " order by created_at desc limit %s", (*params, limit), "all")
 
+    def case_page(self, case_filter: str, member_id: str, case_type: str | None, page: int,
+                  page_size: int) -> tuple[list[dict], int]:
+        """One page of the Cases list for a filter (open, mine, unassigned, resolved), newest first."""
+        where, params = [_CASE_FILTERS[case_filter]], [member_id] if case_filter == "mine" else []
+        if case_type:
+            where.append("case_type = %s"), params.append(case_type)
+        base = f"select * from ({_CASES}) cases where {' and '.join(where)}"
+        return self._page(base, params, "created_at desc, case_id desc", page, page_size)
+
+    def case_counts(self, member_id: str, case_type: str | None) -> dict[str, int]:
+        """The filter chips' numbers, for the whole list (not just one page)."""
+        where, params = ("where case_type = %s", [case_type]) if case_type else ("", [])
+        return self._run(
+            "select count(*) filter (where status <> 'closed') as open, "
+            "count(*) filter (where status <> 'closed' and owner_id = %s) as mine, "
+            "count(*) filter (where status <> 'closed' and owner_id is null) as unassigned, "
+            f"count(*) filter (where status = 'closed') as resolved from ({_CASES}) cases {where}",
+            (member_id, *params), "one")
+
     def case(self, case_type: str, case_id: str) -> dict | None:
         rows = self._run(f"select * from ({_CASES}) cases where case_type = %s and case_id = %s",
                          (case_type, case_id), "all")
@@ -193,6 +235,27 @@ class ConsoleStore:
         sql = _CONVERSATIONS + (f" where {' and '.join(where)}" if where else "")
         return self._run(sql + " order by c.started_at desc limit %s", (*params, limit), "all")
 
+    def _conversations_with_outcome(self, search: str | None) -> tuple[str, list]:
+        where, params = "", []
+        if search:
+            where = (" where (c.caller_name ilike %s or c.summary ilike %s or cu.company_name ilike %s "
+                     "or c.conversation_id ilike %s)")
+            params = [f"%{search}%"] * 4
+        return f"select x.*, {_OUTCOME} as outcome from ({_CONVERSATIONS}{where}) x", params
+
+    def conversation_page(self, search: str | None, outcome: str | None, page: int,
+                          page_size: int) -> tuple[list[dict], int]:
+        """One page of the Conversations list, newest first, optionally only one outcome."""
+        base, params = self._conversations_with_outcome(search)
+        if outcome:
+            base, params = f"select * from ({base}) y where outcome = %s", [*params, outcome]
+        return self._page(base, params, "started_at desc, conversation_id desc", page, page_size)
+
+    def conversation_counts(self, search: str | None) -> dict[str, int]:
+        base, params = self._conversations_with_outcome(search)
+        rows = self._run(f"select outcome, count(*) as n from ({base}) y group by outcome", tuple(params), "all")
+        return {r["outcome"]: r["n"] for r in rows}
+
     def conversation(self, cid: str) -> dict | None:
         return self._run(_CONVERSATIONS + " where c.conversation_id = %s", (cid,), "one")
 
@@ -214,19 +277,20 @@ class ConsoleStore:
                          "c.started_at >= %s and c.started_at < %s", (started_from, started_to), "all")
 
     # --- customers -------------------------------------------------------------------------
-    def customers(self, search: str | None = None) -> list[dict]:
+    def customer_page(self, search: str | None, page: int, page_size: int) -> tuple[list[dict], int]:
+        """One page of the Customers list, by company name."""
         sql = ("select cu.customer_id, cu.company_name as company, cu.contact_name, cu.contact_email, cu.plan, "
                "cu.account_status, cu.region, "
                "(select count(*) from support_tickets t where t.customer_id = cu.customer_id and t.status <> 'closed') "
                "as open_cases, "
                "(select count(*) from conversations c where c.verified_customer_id = cu.customer_id) as calls "
                "from customers cu")
+        params: list = []
         if search:
-            like = f"%{search}%"
-            return self._run(sql + " where cu.company_name ilike %s or cu.contact_name ilike %s or cu.customer_id "
-                             "ilike %s or cu.contact_email ilike %s order by cu.company_name",
-                             (like, like, like, like), "all")
-        return self._run(sql + " order by cu.company_name", (), "all")
+            sql += (" where cu.company_name ilike %s or cu.contact_name ilike %s or cu.customer_id ilike %s "
+                    "or cu.contact_email ilike %s")
+            params = [f"%{search}%"] * 4
+        return self._page(sql, params, "company, customer_id", page, page_size)
 
     def customer(self, customer_id: str) -> dict | None:
         return self._run("select * from customers where customer_id = %s", (customer_id,), "one")

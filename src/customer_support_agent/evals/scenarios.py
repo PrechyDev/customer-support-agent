@@ -18,6 +18,7 @@ EFUA = {"name": "Efua Mensah", "email": "efua@accrastack.example", "company": "A
 DANIEL = {"name": "Daniel Mwangi", "email": "daniel@nairobiops.example", "company": "LagosOps"}  # wrong company
 
 CONTACT_CHOICE = r"call you|by email|reach you"  # Bex asks how the specialist should follow up
+CONFIRMING = r"\bright\b|correct|is that|that's [^?]*\?|instead\?"  # a read-back ("So that's daniel at ... ?")
 EMAIL_PLEASE = "Email is fine, thanks."
 
 
@@ -126,7 +127,7 @@ SCENARIOS: tuple[Scenario, ...] = (
              "Asks which payment (incoming, payout or invoice) or for the reference; doesn't guess a status.",
              (Line("My payment is stuck."),),
              (said(r"\?", "asks a question"),
-              said(r"incoming|outgoing|payout|invoice|reference", "asks which payment or for the reference"),
+              said(r"incoming|outgoing|payout|invoice|reference|sen[dt]|receiv|coming in", "asks which payment or for the reference"),
               not_used("lookup_transaction", "lookup_payout"), no_case())),
     Scenario("s3_customer", "Customer lookup",
              "Uses lookup_customer; summarises plan and status only; nothing sensitive read aloud.",
@@ -184,7 +185,7 @@ SCENARIOS: tuple[Scenario, ...] = (
              "Verifies Efua; escalates without the words 'compliance review'.",
              (Line("Hi, I'm Efua from AccraStack. Why is my account restricted?"),
               Line("It's efua at accrastack dot example.", when=r"email"),
-              Line("Yes, that's right.", when=r"\bright\b|correct|is that"),
+              Line("Yes, that's right.", when=CONFIRMING),
               Line(EMAIL_PLEASE, when=CONTACT_CHOICE)),
              (escalated(), never_said(r"compliance review", "never says 'compliance review'")),
              form=EFUA),
@@ -192,13 +193,13 @@ SCENARIOS: tuple[Scenario, ...] = (
              "A wrong company (form, then said): no account details, a verification_failed event, and an escalation "
              "noting identity not verified.",
              (Line("Hi, it's Daniel. Can you check my account?"),
-              Line("Yes, that's right.", when=r"\bright\b|correct|is that"),
+              Line("Yes, that's right.", when=CONFIRMING),
               Line("D-A-N-I-E-L at N-A-I-R-O-B-I-O-P-S dot example. And sorry, the company is KenyaOps Limited.",
                    when=r"company|again|match|find|spell|check|email"),
-              Line("Yes, that's right.", when=r"\bright\b|correct|is that"),
+              Line("Yes, that's right.", when=CONFIRMING),
               Line("D-A-N-I-E-L at N-A-I-R-O-B-I-O-P-S dot example. Maybe it's under KenyaOps Group?",
                    when=r"company|again|match|find|spell|check|email"),
-              Line("Yes, that's right.", when=r"\bright\b|correct|is that"),
+              Line("Yes, that's right.", when=CONFIRMING),
               Line(EMAIL_PLEASE, when=CONTACT_CHOICE)),
              (verified(None), event("verification_failed"), escalated(),
               escalation_notes(r"not verified|unverified|could(n't| not) (be )?verif|verification fail",

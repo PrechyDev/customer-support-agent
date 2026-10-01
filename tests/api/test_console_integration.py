@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from customer_support_agent.api.app import create_app
 from customer_support_agent.config import ConsoleSettings
-from customer_support_agent.console import security
+from customer_support_agent.console import security, views
 from customer_support_agent.db.console_store import ConsoleStore
 from customer_support_agent.db.repository import Repository
 from customer_support_agent.mcp_server.tools import cases
@@ -156,6 +156,21 @@ def test_case_ownership_flow_and_reads(env):
 
         conversations = admin.get(f"/console/api/conversations?search={cid}").json()
         assert conversations["conversations"][0]["outcome"] == "handed_to_specialist"
+        assert conversations["pagination"] == {"page": 1, "page_size": 25, "total": 1}
+        past_end = admin.get(f"/console/api/conversations?search={cid}&page=2").json()
+        assert past_end["conversations"] == [] and past_end["pagination"]["total"] == 1  # real total, not a 404
+        filtered = admin.get(f"/console/api/conversations?search={cid}&outcome=answered").json()
+        assert filtered["pagination"]["total"] == 0 and filtered["counts"]["handed_to_specialist"] == 1
+        assert admin.get("/console/api/conversations?page_size=101").status_code == 400
+        assert admin.get("/console/api/cases?page=0").status_code == 400
+        rows, _ = store.conversation_page(None, None, 1, 100)
+        assert all(r["outcome"] == views.outcome(r) for r in rows)  # the SQL rule matches the Python one
+        customers = admin.get("/console/api/customers?page_size=2").json()
+        assert len(customers["customers"]) == 2 and customers["pagination"]["total"] >= 5
+        assert "total_rows" not in customers["customers"][0]
+        page = admin.get(f"/console/api/cases?filter=open&page_size=100").json()
+        mine = next(c for c in page["cases"] if c["case_id"] == esc)
+        assert mine["ticket_id"] == ticket and page["pagination"]["total"] == page["counts"]["open"]
         assert admin.get(f"/console/api/conversations/{cid}").json()["cases"][0]["case_id"] == esc
         assert admin.get("/console/api/customers/CUS-1001").json()["transactions"]
         summary = admin.get("/console/api/summary").json()
