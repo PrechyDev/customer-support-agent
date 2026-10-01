@@ -49,6 +49,10 @@ def assess(result: TurnResult | None, sent_text: str) -> Assessment:
         lookups = [t for t in tools if t in LOOKUP_TOOLS]
         if lookups:
             return Assessment("answer", f"{unlabelled}From tool result: {', '.join(lookups)}.{extra}", True)
+        earlier = [t for t in dict.fromkeys(_short(t) for t in result.call_tools) if t in LOOKUP_TOOLS]
+        if earlier:  # repeating a status or confirmation from earlier in the call
+            return Assessment("answer", f"{unlabelled}From an earlier tool result in this call: {', '.join(earlier)}.{extra}",
+                              True)
         return Assessment("answer", f"{unlabelled}{NOT_GROUNDED}: no knowledge base source or lookup this turn.{extra}",
                           False)
     if answer_type == "escalate":

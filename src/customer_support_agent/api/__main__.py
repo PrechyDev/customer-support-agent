@@ -77,7 +77,7 @@ def main() -> int:
                                 exclusive=True)
         return "escalation_id" in result
 
-    manager = SessionManager(make_session_factory(agent_settings, kb), max_sessions=agent_settings.max_sessions,
+    manager = SessionManager(make_session_factory(agent_settings, kb, repo=repo), max_sessions=agent_settings.max_sessions,
                              idle_seconds=agent_settings.session_idle_seconds,
                              wait_seconds=agent_settings.turn_timeout_seconds, on_idle_close=recorder.abandoned,
                              on_stuck=escalate_stuck)

@@ -204,9 +204,9 @@ def test_a_request_vapi_cancelled_before_anything_was_said_is_not_a_turn():
     assert repo.turns == []
 
 
-def test_a_pause_sent_as_a_turn_gets_no_reply_and_is_not_recorded():
-    manager, repo = FakeManager(), FakeRepository()
+def test_a_pause_sent_as_a_turn_is_held_then_gets_a_short_prompt_never_the_agent():
+    manager = FakeManager()
     body = {**BODY, "messages": [{"role": "user", "content": "Um, I."}]}
-    with TestClient(create_app(manager, vapi_secret=SECRET, recorder=CallRecorder(repo))) as c:
+    with TestClient(create_app(manager, vapi_secret=SECRET, filler_wait=0.05)) as c:
         response = c.post("/chat/completions", json=body, headers={"X-RelayPay-Secret": SECRET})
-    assert contents(response.text) == "" and manager.asked == [] and repo.turns == []
+    assert contents(response.text) == fallbacks.FILLER_ACK and manager.asked == []  # never sent to Claude

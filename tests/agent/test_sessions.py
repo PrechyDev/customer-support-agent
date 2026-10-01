@@ -102,7 +102,7 @@ def test_technical_failure_asks_to_repeat_then_ends_the_call():
     assert again[0] == fallbacks.TECHNICAL_PROBLEM
     assert (second_in_row[0], second_in_row[1].ends_call) == (fallbacks.TECHNICAL_GOODBYE, True)
     assert fallbacks.END_CALL_PHRASE in second_in_row[0]
-    assert m.active_count == 0  # engine closed with the call
+    assert m.active_count == 1  # kept until Vapi says the call ended (the caller may cut in before "Goodbye")
     assert asyncio.run(ask(m, "empty"))[0] == fallbacks.EMPTY_REPLY
 
 
@@ -205,7 +205,9 @@ def test_end_call_signal_makes_the_backend_say_the_goodbye_and_hang_up():
     m = manager(Factory({"a": [[*reply("<end_call/>", say=False), result()]]}))
     spoken, last = asyncio.run(ask(m, "a", "no, that's all"))
     assert (spoken, last.ends_call) == (fallbacks.GOODBYE, True)
-    assert m.active_count == 0  # engine closed with the call
+    assert m.active_count == 1  # still there if the caller cuts into the goodbye...
+    asyncio.run(m.close("a"))  # ...until Vapi's end-of-call event closes it
+    assert m.active_count == 0
 
 
 def test_a_form_that_arrives_after_the_session_is_built_is_told_to_the_agent_once():

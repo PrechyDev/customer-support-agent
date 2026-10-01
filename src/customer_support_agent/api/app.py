@@ -16,6 +16,8 @@ from customer_support_agent.agent import fallbacks
 from customer_support_agent.agent.grounding import assess
 from customer_support_agent.agent.phrase_check import flag_caller, flag_phrases, is_filler
 from customer_support_agent.agent.session import AgentEvent, TextDelta, TurnResult
+from customer_support_agent.agent.spoken import forget as forget_spoken
+from customer_support_agent.agent.spoken import remember as remember_spoken
 from customer_support_agent.api.auth import check_vapi_secret, describe_auth_header
 from customer_support_agent.api.caller import caller_from_vapi
 from customer_support_agent.api.heard import heard_note
@@ -64,6 +66,7 @@ def _reject(request: Request, secret: str) -> JSONResponse:
 
 def create_app(manager: Manager, vapi_secret: str,
                reassure_after: float = fallbacks.REASSURANCE_AFTER_SECONDS,
+               filler_wait: float = fallbacks.FILLER_WAIT_SECONDS,
                recorder: CallRecorder | None = None, voice: VoiceSettings | None = None,
                repo: Any | None = None) -> FastAPI:
     recorder = recorder or CallRecorder(None)  # no database: nothing is recorded, calls still work
@@ -137,6 +140,7 @@ def create_app(manager: Manager, vapi_secret: str,
 
         def on_done(result: TurnResult | None, sent: str, first_text_ms: float | None) -> None:
             last_sent[call_id] = sent
+            remember_spoken(call_id, sent)  # lets a tool see what the caller just heard read back
             checked = assess(result, sent)
             note = checked.note
             flags = flag_phrases(sent)  # log-only: the reply is already spoken
@@ -152,15 +156,13 @@ def create_app(manager: Manager, vapi_secret: str,
                           first_text_ms, _ms_since(started))
 
         if is_filler(parsed.message):
-            # "Um, I.": Vapi sent a pause as a turn. Answering it ("Take your time") talks over the caller, so
-            # say nothing and keep listening. Not a turn: nothing recorded, nothing sent to Claude.
-            logger.info("Caller only paused (%d words of filler); not sent to the agent (conversation=%s)",
+            # "Um, I.": Vapi sent a pause as a turn. Answering it talks over the caller, and an empty reply
+            # seemed to leave Vapi stuck (25 s of silence in a test). So hold the request: if the caller keeps
+            # talking, Vapi cancels it and resends the full sentence; if not, a short "Mm-hm?" after a moment.
+            logger.info("Caller only paused (%d words of filler); holding, not sent to the agent (conversation=%s)",
                         len(parsed.message.split()), call_id)
-            if parsed.stream:
-                return StreamingResponse(iter([sse_chunk(None, chunk_id=chunk_id, model=MODEL_NAME, finish=True),
-                                               sse_done()]), media_type="text/event-stream")
-            return JSONResponse(completion("", chunk_id=chunk_id, model=MODEL_NAME))
-        if len(parsed.message) > fallbacks.MAX_MESSAGE_CHARS:  # checked on the caller's own words, before Claude
+            events = _fixed_line(fallbacks.FILLER_ACK, delay=filler_wait)
+        elif len(parsed.message) > fallbacks.MAX_MESSAGE_CHARS:  # checked on the caller's own words, before Claude
             logger.warning("Caller message too long (%d chars); not sent to the agent (conversation=%s)",
                            len(parsed.message), call_id)
             events = _fixed_line(fallbacks.TOO_LONG)
@@ -199,6 +201,7 @@ def create_app(manager: Manager, vapi_secret: str,
             logger.info("Call ended (conversation=%s event=%s reason=%s)", call_id, kind,
                         message.get("endedReason") or (message.get("call") or {}).get("endedReason") or "not given")
             last_sent.pop(str(call_id), None)
+            forget_spoken(str(call_id))
             callers.pop(str(call_id), None)
             flagged.pop(str(call_id), None)
             analysis = message.get("analysis") if isinstance(message.get("analysis"), dict) else {}
@@ -280,8 +283,11 @@ async def _collect(events: AsyncIterator[AgentEvent], chunk_id: str, started: fl
     return completion("".join(parts), chunk_id=chunk_id, model=MODEL_NAME)
 
 
-async def _fixed_line(line: str) -> AsyncIterator[AgentEvent]:
-    """A reply from the backend alone, shaped like an agent turn so it streams and is logged the same way."""
+async def _fixed_line(line: str, delay: float = 0.0) -> AsyncIterator[AgentEvent]:
+    """A reply from the backend alone, shaped like an agent turn so it streams and is logged the same way.
+    With a delay, Vapi can cancel the request first (the caller kept talking), and then nothing is said."""
+    if delay:
+        await asyncio.sleep(delay)
     yield TextDelta(line)
     yield TurnResult(outcome="ok", fallback=line)
 

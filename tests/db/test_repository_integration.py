@@ -83,9 +83,10 @@ def test_the_tools_keep_accurate_records_on_the_real_database(repo, cid):
 
     escalation = cases.create_escalation(repo, cid, "account", "Restricted", NOW, reference="TXN-9004")
     assert escalation["ticket_id"] and escalation["created"]
-    call = cases.create_escalation(repo, cid, "account", "Restricted", NOW, contact_method="call",
-                                   callback_day="monday", callback_time="afternoon", callback_place="Accra",
-                                   callback_phone="+233 24 412 3456", phone_confirmed=True)
+    request = dict(contact_method="call", callback_day="monday", callback_time="afternoon", callback_place="Accra",
+                   callback_phone="+233 24 412 3456")
+    assert cases.create_escalation(repo, cid, "account", "Restricted", NOW, **request)["error"] == "confirm_phone"
+    call = cases.create_escalation(repo, cid, "account", "Restricted", NOW, phone_confirmed=True, **request)
     saved = repo.escalations(cid)[0]
     assert (saved["contact_method"], saved["callback_phone"], saved["call_booked"]) == ("call", "+233244123456", True)
     assert "Accra time" in call["follow_up_summary"]

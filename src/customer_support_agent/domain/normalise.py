@@ -9,6 +9,8 @@ _DIGIT_WORDS = {
     "zero": "0", "oh": "0", "o": "0", "one": "1", "two": "2", "three": "3", "four": "4",
     "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
 }
+# A single letter followed by a separator and another single letter: a spelled-out word.
+_SPELLED = re.compile(r"\b([a-z])[\s.\-]+(?=[a-z]\b)")
 _EMAIL = re.compile(r"^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$")
 REFERENCE = re.compile(r"^(TXN|PAY)-\d{4}$")
 
@@ -18,10 +20,16 @@ def normalise_email(raw: str | None) -> str | None:
     if not raw:
         return None
     text = f" {raw.strip().lower()} "
+    text = _SPELLED.sub(r"\1", text)  # "l-a-g-o-s" / "l. e. d g e r" -> "lagos" / "ledger"
     text = re.sub(r"\s+at\s+", "@", text)
     text = re.sub(r"\s+dot\s+", ".", text)
-    text = re.sub(r"\s+", "", text)
+    text = re.sub(r"\s+", "", text).strip(".,")  # transcripts end sentences with a full stop
     return text if _EMAIL.match(text) else None
+
+
+def spoken_email(email: str) -> str:
+    """'amara@lagosledger.example' -> 'amara at lagosledger dot example', for reading back."""
+    return email.replace("@", " at ").replace(".", " dot ")
 
 
 def normalise_company(raw: str | None) -> str:

@@ -17,8 +17,9 @@ from customer_support_agent.domain.normalise import (
     parse_reference,
     spoken_phone,
 )
+from customer_support_agent.agent.spoken import heard_digits, heard_text
 from customer_support_agent.mcp_server.tools.common import (
-    MAX_ESCALATIONS, MAX_TICKETS, PRIORITIES, TICKET_CATEGORIES, error,
+    MAX_ESCALATIONS, MAX_TICKETS, PRIORITIES, TICKET_CATEGORIES, confirmed, error,
 )
 
 EVENT_TYPES = ("sensitive_request", "injection_attempt", "verification_failed", "caller_frustrated", "other")
@@ -32,9 +33,10 @@ CREATE_ESCALATION = (
     "Hand the caller to a specialist: restrictions, compliance, disputes/refunds/cancellations, frustration, "
     "next_step=escalate, failed verification, or they want a human. category: compliance, account, dispute, "
     "payment or other. Pass the transaction or payout reference if there is one. Links a ticket automatically. "
-    "No verification needed. Contact comes from the verified account or the pre-call form; only if neither "
-    "exists, ask for the caller's name and email and pass user_name/user_email (it returns confirm_email: say its "
-    "'say' line, then call again with email_confirmed true). Then ask how they'd like to be contacted. For a call: "
+    "No verification needed. Call it straight away: contact comes from the verified account or the pre-call form, "
+    "and it returns needs_contact only if neither exists; then ask for the caller's name and email and pass "
+    "user_name/user_email (it returns confirm_email: say its 'say' line, then call again with email_confirmed true). "
+    "Then ask how they'd like to be contacted; for email, call it again with contact_method='email'. For a call: "
     "pass contact_method='call', callback_day, callback_time (morning/afternoon/evening/'3pm'/'any'), "
     "callback_place (city or time zone) and callback_phone (exactly as said; a local number is fine when the place "
     "is known; not needed if the form has one). It checks the time and returns confirm_phone: say its 'say' line "
@@ -101,8 +103,8 @@ def _contact(repo: Any, conversation: dict, user_name: str | None, user_email: s
 _ANY_TIME = ("", "any", "anytime", "any time")
 
 
-def _call_request(conversation: dict, place: str | None, day: str | None, when: str | None, phone: str | None,
-                  phone_confirmed: bool, preferred_time: str | None, now: datetime) -> tuple[dict | None, dict | None]:
+def _call_request(cid: str, conversation: dict, place: str | None, day: str | None, when: str | None,
+                  phone: str | None, phone_confirmed: bool, preferred_time: str | None, now: datetime) -> tuple[dict | None, dict | None]:
     """(callback columns, error). The time and place are checked first (a weekend or an unknown place is
     caught before anything is confirmed). The place also gives the country code, so a local number
     ('0814 346 3800') is fine. A spoken number is confirmed once, together with the time."""
@@ -131,7 +133,9 @@ def _call_request(conversation: dict, place: str | None, day: str | None, when: 
         if number is None:
             return None, error("invalid_input", "Ask for the number with the country code (we don't know which "
                                                 "country it's in), then call again.")
-        if not phone_confirmed:
+        local = spoken_phone(number).replace(" ", "")  # e.g. 08143463800, as the caller would say it
+        heard = any(heard_digits(cid, digits) for digits in (local, number[1:]))
+        if not confirmed(cid, "phone", number, phone_confirmed, heard):
             when_said = f", on {spoken}" if spoken else ""
             return None, {"error": "confirm_phone", "say": f"Just to confirm: {spoken_phone(number)}{when_said}. Is that right?",
                           "hint": "Read the say line once; if they confirm, call again with phone_confirmed true."}
@@ -174,7 +178,7 @@ def create_escalation(repo: Any, cid: str, category: str, reason: str, now: date
     wants_call = contact_method == "call" or bool(callback_day or callback_time or callback_phone)
     callback = None
     if wants_call:
-        callback, problem = _call_request(conversation, callback_place, callback_day, callback_time, callback_phone,
+        callback, problem = _call_request(cid, conversation, callback_place, callback_day, callback_time, callback_phone,
                                           phone_confirmed, preferred_time, now)
         if problem:
             return problem
@@ -197,7 +201,8 @@ def create_escalation(repo: Any, cid: str, category: str, reason: str, now: date
         return error("needs_contact", "Ask for the caller's name and email, then call again with user_name and "
                                       "user_email.")
     email_was_spoken = not (conversation.get("verified_customer_id") or conversation.get("caller_email"))
-    if email_was_spoken and not email_confirmed:  # a misheard email means nobody can follow up: always read it back
+    heard = heard_text(cid, email, _spoken_email(email))
+    if email_was_spoken and not confirmed(cid, "email", email, email_confirmed, heard):  # misheard = nobody follows up
         return {"error": "confirm_email", "say": f"Just to confirm, that's {_spoken_email(email)}. Is that right?",
                 "hint": "Read the email back; if they confirm, call again with email_confirmed true."}
     if len(escalations) >= MAX_ESCALATIONS:

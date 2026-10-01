@@ -2,7 +2,9 @@
 
 from pathlib import Path
 
-from claude_agent_sdk import ClaudeAgentOptions
+from collections.abc import Callable
+
+from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 
 from customer_support_agent.config import AgentSettings
 
@@ -13,7 +15,8 @@ ALLOWED_TOOLS = [f"mcp__{MCP_SERVER}__{name}" for name in TOOL_NAMES]
 KB_TOOL = ALLOWED_TOOLS[0]
 
 
-def build_options(settings: AgentSettings, system_prompt: str, conversation_id: str, workdir: Path) -> ClaudeAgentOptions:
+def build_options(settings: AgentSettings, system_prompt: str, conversation_id: str, workdir: Path,
+                  stop_hook: Callable | None = None) -> ClaudeAgentOptions:
     return ClaudeAgentOptions(
         system_prompt=system_prompt,  # replaces Claude Code's own coding-assistant prompt
         model=settings.model,
@@ -36,6 +39,8 @@ def build_options(settings: AgentSettings, system_prompt: str, conversation_id: 
         include_partial_messages=True,  # text arrives in pieces so Vapi can speak sooner
         thinking={"type": "disabled"},  # thinking adds seconds before the first word
         cwd=str(workdir),  # an empty folder, not the repo
+        # Our own code, run when the agent is about to finish a turn (agent/promise_guard.py).
+        hooks={"Stop": [HookMatcher(hooks=[stop_hook])]} if stop_hook else None,
         env={
             "ANTHROPIC_API_KEY": settings.anthropic_api_key,
             # Auto memory loads into the prompt even with setting_sources=[] (SDK hosting docs).

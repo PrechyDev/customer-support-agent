@@ -51,22 +51,26 @@ def create_mcp_server(kb: KnowledgeBase, log_store: RetrievalLogStore, repo: Any
         return knowledge.search_knowledge_base(query, kb=kb, log_store=log_store, conversation_id=ready(ctx))
 
     @server.tool(description=accounts.LOOKUP_CUSTOMER)
-    async def lookup_customer(ctx: Context, email: str | None = None, company_name: str | None = None) -> dict[str, Any]:
+    async def lookup_customer(ctx: Context, email: str | None = None, company_name: str | None = None,
+                              email_confirmed: bool = False) -> dict[str, Any]:
         cid = ready(ctx)
         return await run_tool(repo, cid, "lookup_customer", "verify caller", f"email={mask_email(email)} company={company_name}",
-                              lambda: accounts.lookup_customer(repo, cid, email, company_name), exclusive=True)
+                              lambda: accounts.lookup_customer(repo, cid, email, company_name, email_confirmed),
+                              exclusive=True)
 
     @server.tool(description=accounts.LOOKUP_TRANSACTION)
     async def lookup_transaction(transaction_id: str, ctx: Context) -> dict[str, Any]:
         cid = ready(ctx)
         return await run_tool(repo, cid, "lookup_transaction", "transaction status", f"ref={transaction_id}",
-                              lambda: accounts.lookup_transaction(repo, cid, transaction_id, now().date()))
+                              lambda: accounts.lookup_transaction(repo, cid, transaction_id, now().date(), now()),
+                              exclusive=True)  # may create an escalation or ticket
 
     @server.tool(description=accounts.LOOKUP_PAYOUT)
     async def lookup_payout(ctx: Context, payout_id: str | None = None, transaction_id: str | None = None) -> dict[str, Any]:
         cid = ready(ctx)
         return await run_tool(repo, cid, "lookup_payout", "payout status", f"payout={payout_id} txn={transaction_id}",
-                              lambda: accounts.lookup_payout(repo, cid, payout_id, transaction_id, now().date()))
+                              lambda: accounts.lookup_payout(repo, cid, payout_id, transaction_id, now().date(), now()),
+                              exclusive=True)  # may create an escalation or ticket
 
     @server.tool(description=cases.CREATE_TICKET)
     async def create_support_ticket(category: str, priority: str, summary: str, ctx: Context,
@@ -86,7 +90,7 @@ def create_mcp_server(kb: KnowledgeBase, log_store: RetrievalLogStore, repo: Any
                                 phone_confirmed: bool = False) -> dict[str, Any]:
         cid = ready(ctx)
         summary = (f"{category} ref={reference} method={contact_method} email={mask_email(user_email)} "
-                   f"phone={mask_phone(normalise_phone(callback_phone))} callback={callback_day} {callback_time} {callback_place}")
+                   f"phone={mask_phone(normalise_phone(callback_phone) or re.sub(r'[^0-9+]', '', callback_phone or ''))} callback={callback_day} {callback_time} {callback_place}")
         return await run_tool(repo, cid, "create_escalation", "hand to a specialist", summary,
                               lambda: cases.create_escalation(repo, cid, category, reason, now(), user_name, user_email,
                                                               reference, contact_method, callback_place, callback_day,

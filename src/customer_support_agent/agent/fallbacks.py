@@ -34,6 +34,11 @@ TECHNICAL_GOODBYE = (
 BUSY_GOODBYE = f"Sorry, we're very busy right now. Please call back in a few minutes. {END_CALL_PHRASE}"
 EMPTY_REPLY = "Sorry, could you say that again?"
 
+# A message that's only thinking sounds ("um, I"): held this long so Vapi can resend the full sentence;
+# if it doesn't, this short line hands the turn back without talking over the caller.
+FILLER_WAIT_SECONDS = 3.0
+FILLER_ACK = "Mm-hm?"
+
 # A caller message longer than this never reaches Claude (cost guard if the Vapi secret leaked).
 # 2,000 characters is about 350 words, over two minutes of non-stop speech: real callers never get near it.
 MAX_MESSAGE_CHARS = 2000

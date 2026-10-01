@@ -100,6 +100,7 @@ class TurnResult:
     answer_type: str | None = None  # from <say type="...">; None if the model didn't label it
     sources: tuple[str, ...] = ()  # chunk IDs the model says its answer came from
     kb_chunks: tuple[str, ...] = ()  # chunk IDs the knowledge base actually returned this turn
+    call_tools: tuple[str, ...] = ()  # every tool used so far in this call (a status can be repeated later)
     api_error: str | None = None  # the engine's error kind, e.g. billing_error, authentication_failed
 
 
@@ -229,7 +230,13 @@ class AgentSession:
         self.conversation_id = conversation_id
         self._timeout = turn_timeout_seconds
         self._cleanup: asyncio.Task[None] | None = None  # drain of an abandoned turn
+        self._turn: _Turn | None = None  # the turn in progress (read by the Stop hook)
+        self._call_tools: list[str] = []
         self.broken = False  # the engine couldn't be brought back to a clean state
+
+    def spoken_this_turn(self) -> str:
+        """What the caller has heard from the model in the current turn so far."""
+        return " ".join(self._turn.spoken) if self._turn else ""
 
     async def start(self) -> None:
         """Starts the engine and connects to MCP. Errors propagate: the manager decides what the caller hears."""
@@ -256,7 +263,7 @@ class AgentSession:
 
     async def ask(self, message: str) -> AsyncIterator[AgentEvent]:
         started = time.perf_counter()
-        turn = _Turn(self.conversation_id)
+        turn = self._turn = _Turn(self.conversation_id)
         queue: asyncio.Queue[Any] = asyncio.Queue()
         pump = asyncio.create_task(self._pump(message, queue))
         deadline = asyncio.get_running_loop().time() + self._timeout
@@ -287,6 +294,7 @@ class AgentSession:
                     logger.info("Agent turn cancelled mid-reply (conversation=%s)", self.conversation_id)
                 self._cleanup = asyncio.create_task(self._stop_and_drain(pump))
 
+        self._call_tools += [t for t in turn.tools if t not in self._call_tools]
         result = TurnResult(
             outcome=outcome,
             text=" ".join(turn.spoken),
@@ -299,6 +307,7 @@ class AgentSession:
             answer_type=turn.answer_type,
             sources=tuple(turn.sources),
             kb_chunks=tuple(turn.kb_chunks),
+            call_tools=tuple(self._call_tools),
             api_error=turn.api_error or _error_from_status(turn.result),
         )
         logger.info(

@@ -5,25 +5,36 @@ what the caller may hear: no amounts, no other customers, no failure reasons.
 """
 
 import hashlib
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
-from customer_support_agent.domain.normalise import normalise_company, normalise_email, parse_reference
+from customer_support_agent.domain.normalise import normalise_company, normalise_email, parse_reference, spoken_email
 from customer_support_agent.domain.status import caller_status
-from customer_support_agent.mcp_server.tools.common import MAX_LOOKUP_MISSES, MAX_VERIFICATION_ATTEMPTS, error
+from customer_support_agent.agent.spoken import heard_text
+from customer_support_agent.mcp_server.tools import cases
+from customer_support_agent.mcp_server.tools.common import (
+    MAX_LOOKUP_MISSES,
+    MAX_VERIFICATION_ATTEMPTS,
+    confirmed,
+    error,
+)
 
 LOOKUP_CUSTOMER = (
     "Verify the caller and get their account summary. Needs BOTH the email and the company name. Leave out "
-    "either one to use what the caller typed in the pre-call form. Returns found=false on any mismatch (never say which "
-    "part failed). Max 2 attempts per call, then escalate as 'identity not verified'."
+    "either one to use what the caller typed in the pre-call form. A spoken email returns confirm_email first: say "
+    "its 'say' line and call again with email_confirmed true once they agree (only a confirmed email counts as an "
+    "attempt). Returns found=false on any mismatch (never say which part failed). Max 2 attempts per call, then "
+    "escalate as 'identity not verified'."
 )
 LOOKUP_TRANSACTION = (
     "Status of one transaction, from the reference the caller gives (pass exactly what they said). "
-    "Returns only a status, a line you can say, and next_step (none / ticket / escalate). Never guess a reference."
+    "Returns only a status, a line you can say ('say'), and next_step. If the status needs people, it creates the "
+    "escalation or ticket itself and says what to do in 'next'. Always say 'say' first. Never guess a reference."
 )
 LOOKUP_PAYOUT = (
     "Status of one payout, by its payout reference or its transaction reference. Returns only a status, "
-    "a line you can say, and next_step. Never state a failure reason."
+    "a line you can say, and next_step; like lookup_transaction it creates the escalation itself when needed and "
+    "says what to do in 'next'. Never state a failure reason."
 )
 
 
@@ -33,18 +44,25 @@ def _verified_summary(c: dict) -> dict[str, Any]:
             "support_notes": c["support_notes"]}  # for deciding only: the prompt forbids saying it
 
 
-def lookup_customer(repo: Any, cid: str, email: str | None, company_name: str | None) -> dict[str, Any]:
+def lookup_customer(repo: Any, cid: str, email: str | None, company_name: str | None,
+                    email_confirmed: bool = False) -> dict[str, Any]:
     conversation = repo.ensure_conversation(cid) or {}
     if conversation.get("verified_customer_id"):  # already verified this call: no new attempt
         return _verified_summary(repo.customer(conversation["verified_customer_id"]))
     if (conversation.get("verification_attempts") or 0) >= MAX_VERIFICATION_ATTEMPTS:
         return error("limit_reached", "Too many attempts. Don't try again: escalate as 'identity not verified'.")
 
+    email_was_spoken = bool(email)  # the form's email was typed; a spoken one may be misheard
     email = email or conversation.get("caller_email")  # what was said wins; otherwise the pre-call form
     company_name = company_name or conversation.get("caller_company")
     wanted_email, wanted_company = normalise_email(email), normalise_company(company_name)
     if not wanted_email or not wanted_company:
         return error("invalid_input", "Need both a valid email and the company name. Ask for whichever is missing.")
+    heard = heard_text(cid, wanted_email, spoken_email(wanted_email))
+    if email_was_spoken and not confirmed(cid, "email", wanted_email, email_confirmed, heard):  # misheard: no attempt
+        return {"error": "confirm_email", "say": f"Just to confirm, that's {spoken_email(wanted_email)}. Is that right?",
+                "hint": "Say the line; if they agree, call again with email_confirmed true. If not, ask them to "
+                        "spell it letter by letter."}
 
     fingerprint = hashlib.sha256(f"{wanted_email}|{wanted_company}".encode()).hexdigest()
     if fingerprint == conversation.get("last_verification_try"):  # same details again: not a new attempt
@@ -60,7 +78,8 @@ def lookup_customer(repo: Any, cid: str, email: str | None, company_name: str | 
         if left <= 0:  # logged here, so the record never depends on the model remembering
             repo.log_event(cid, "verification_failed", f"Email and company didn't match after {attempts} attempts")
         return {"found": False, "attempts_left": max(left, 0),
-                "hint": "Ask them to repeat the email and company once." if left > 0
+                "hint": "Ask them to spell the email letter by letter and confirm the company, then try once more."
+                if left > 0
                 else "Don't try again: escalate as 'identity not verified'."}
     repo.mark_verified(cid, customer["customer_id"])
     return _verified_summary(customer)
@@ -110,21 +129,50 @@ def _not_found(ref: str) -> dict[str, Any]:
             "hint": "Say you couldn't find it; ask them to repeat it once, then offer a ticket."}
 
 
-def lookup_transaction(repo: Any, cid: str, transaction_id: str | None, today: date) -> dict[str, Any]:
+def _act_on(repo: Any, cid: str, result: dict[str, Any], now: datetime | None) -> dict[str, Any]:
+    """A status that needs people acts straight away, in code (SPECS §5, §6): "escalate" creates the escalation
+    and its ticket, "ticket" creates the ticket. Bex then has one result to speak from and nothing to forget
+    (in voice tests she skipped the second tool call, or her status line was lost before it)."""
+    step, ref = result.get("next_step"), result.get("reference")
+    if now is None or step not in ("escalate", "ticket"):
+        return result
+    thing = "Payment" if ref.startswith("TXN-") else "Payout"
+    reason = f"{thing} {ref} is {result['status']}"
+    if step == "ticket":
+        made = cases.create_support_ticket(repo, cid, "payment", "high", reason, ref)
+        if "ticket_id" in made:
+            return {**result, "ticket_id": made["ticket_id"],
+                    "next": f"Say the status line, then that you've logged it for the team, reference {made['ticket_id']}."}
+        return {**result, "next": "Say the status line, then: " + made.get("hint", "offer a specialist.")}
+    category = "compliance" if result["status"] == "under review" else "payment"
+    made = cases.create_escalation(repo, cid, category, reason, now, reference=ref)
+    if "escalation_id" in made:
+        return {**result, "escalation_id": made["escalation_id"], "ticket_id": made["ticket_id"],
+                "next": "Say the status line, then that you've passed it to a specialist, then ask whether they'd "
+                        "like a call back or an email."}
+    if made.get("error") == "needs_contact":
+        return {**result, "next": "Say the status line, then that a specialist needs to look into it, and ask for "
+                                  f"their name and email. Then call create_escalation with them and reference {ref}."}
+    return {**result, "next": "Say the status line, then: " + made.get("hint", "offer a specialist.")}
+
+
+def lookup_transaction(repo: Any, cid: str, transaction_id: str | None, today: date,
+                       now: datetime | None = None) -> dict[str, Any]:
     ref = parse_reference(transaction_id, default_prefix="TXN")
     if ref is None:
         return _malformed(repo, cid, transaction_id)
     if ref.startswith("PAY-"):
-        return lookup_payout(repo, cid, payout_id=ref, transaction_id=None, today=today)
+        return lookup_payout(repo, cid, payout_id=ref, transaction_id=None, today=today, now=now)
     record, problem = _lookup(repo, cid, "transaction", ref)
     if problem:
         return problem
     if record is None:
         return _not_found(ref)
-    return _status_result("transaction", ref, record, "estimated_arrival", today)
+    return _act_on(repo, cid, _status_result("transaction", ref, record, "estimated_arrival", today), now)
 
 
-def lookup_payout(repo: Any, cid: str, payout_id: str | None, transaction_id: str | None, today: date) -> dict[str, Any]:
+def lookup_payout(repo: Any, cid: str, payout_id: str | None, transaction_id: str | None, today: date,
+                  now: datetime | None = None) -> dict[str, Any]:
     pay_ref = parse_reference(payout_id, default_prefix="PAY") if payout_id else None
     txn_ref = parse_reference(transaction_id, default_prefix="TXN") if transaction_id else None
     if pay_ref and pay_ref.startswith("TXN-"):  # a transaction reference given as the payout
@@ -137,4 +185,4 @@ def lookup_payout(repo: Any, cid: str, payout_id: str | None, transaction_id: st
         return problem
     if record is None:
         return _not_found(pay_ref or txn_ref)
-    return _status_result("payout", record["payout_id"], record, "scheduled_for", today)
+    return _act_on(repo, cid, _status_result("payout", record["payout_id"], record, "scheduled_for", today), now)

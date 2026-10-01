@@ -21,6 +21,20 @@ TICKET_CATEGORIES = ("compliance", "account", "dispute", "payment", "other")
 PRIORITIES = ("high", "medium", "low")
 
 
+_pending: dict[tuple[str, str], str] = {}  # (call ID, "phone" | "email") -> value the tool read back last
+
+
+def confirmed(cid: str, kind: str, value: str, said_yes: bool, heard: bool) -> bool:
+    """One read-back, never two. Accepted when the caller said yes (said_yes) to THIS value, either because the
+    tool read it back last time, or because it was in what Bex just said (heard). Otherwise the tool reads
+    it back now: the value is remembered, and the caller confirms on the next call."""
+    if said_yes and (heard or _pending.get((cid, kind)) == value):
+        _pending.pop((cid, kind), None)
+        return True
+    _pending[(cid, kind)] = value
+    return False
+
+
 def error(code: str, hint: str) -> dict[str, Any]:
     """The only error shape the model sees: a code and what to do next. Never internal details."""
     return {"error": code, "hint": hint}

@@ -127,8 +127,8 @@ class SessionManager:
                         yield TextDelta((" " if spoke else "") + line)
                     yield replace(event, fallback=line, ends_call=ends_call)
             entry.last_used = self._clock()
-            if ends_call:  # Vapi hangs up on the end-call phrase; free the engine now
-                await self.close(conversation_id)
+            # Not closed on the goodbye: if the caller cuts in before the end-call word is spoken, Vapi keeps the
+            # call going and Bex must still remember it. Vapi's end-of-call event closes the session (idle backstop).
         finally:
             entry.lock.release()
 

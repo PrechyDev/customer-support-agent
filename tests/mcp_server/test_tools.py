@@ -5,22 +5,43 @@ from customer_support_agent.mcp_server.tools import accounts, cases
 from customer_support_agent.mcp_server.tools.common import run_tool
 from tests.mcp_server.fake_repo import FakeRepository
 
+import pytest
+
+from customer_support_agent.agent import spoken
+from customer_support_agent.mcp_server.tools import common
+
+
+@pytest.fixture(autouse=True)
+def fresh_call_memory():
+    """What Bex last said and pending read-backs are per call, in memory: start each test clean."""
+    spoken._last.clear()
+    common._pending.clear()
+    yield
+    spoken._last.clear()
+    common._pending.clear()
+
 TODAY = date(2026, 10, 1)
 NOW = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)  # Thursday
 
 
 def test_verification_checks_both_fields_and_caps_attempts():
     repo = FakeRepository()
-    wrong = accounts.lookup_customer(repo, "c1", "amara at lagosledger dot example", "AccraStack")
-    assert wrong == {"found": False, "attempts_left": 1, "hint": "Ask them to repeat the email and company once."}
-    ok = accounts.lookup_customer(repo, "c1", "amara at lagosledger dot example", "Lagos Ledger")
+    said = accounts.lookup_customer(repo, "c1", "amara at L-A-G-O-S ledger dot example", "AccraStack")
+    assert (said["error"], said["say"]) == ("confirm_email", "Just to confirm, that's amara at lagosledger dot example. Is that right?")
+    assert repo.conversations["c1"]["verification_attempts"] == 0  # not confirmed yet: no attempt used
+    wrong = accounts.lookup_customer(repo, "c1", "amara at lagosledger dot example", "AccraStack", email_confirmed=True)
+    assert (wrong["found"], wrong["attempts_left"]) == (False, 1) and "letter by letter" in wrong["hint"]
+    spoken.remember("c1", "Just to confirm, that's amara at lagosledger dot example. Is that right?")
+    ok = accounts.lookup_customer(repo, "c1", "amara at lagosledger dot example", "Lagos Ledger", email_confirmed=True)
     assert (ok["found"], ok["plan"], repo.conversations["c1"]["verified_customer_id"]) == (True, "Growth", "CUS-1001")
     assert "contact_email" not in ok  # details held on file never reach the model
 
     repo2 = FakeRepository()
+    spoken.remember("c2", "Just to confirm, that's efua at accrastack dot example?")  # Bex read it back herself
     for company in ("Wrong Co", "Wrong Co", "Other Co"):  # the exact repeat doesn't use up the retry
-        accounts.lookup_customer(repo2, "c2", "efua@accrastack.example", company)
-    assert accounts.lookup_customer(repo2, "c2", "efua@accrastack.example", "AccraStack")["error"] == "limit_reached"
+        accounts.lookup_customer(repo2, "c2", "efua@accrastack.example", company, email_confirmed=True)
+    assert accounts.lookup_customer(repo2, "c2", "efua@accrastack.example", "AccraStack",
+                                    email_confirmed=True)["error"] == "limit_reached"
     assert [e[1] for e in repo2.events] == ["verification_failed"]  # logged by the tool, once
 
     form = FakeRepository()
@@ -49,7 +70,8 @@ def test_guessing_references_stops_lookups_and_other_customers_references_are_fl
     assert [e[1] for e in repo.events] == ["sensitive_request"]  # "possible reference guessing", logged once
 
     verified = FakeRepository()
-    accounts.lookup_customer(verified, "c2", "efua@accrastack.example", "AccraStack")  # CUS-1003
+    spoken.remember("c2", "That's efua at accrastack dot example, right?")
+    accounts.lookup_customer(verified, "c2", "efua@accrastack.example", "AccraStack", email_confirmed=True)  # CUS-1003
     assert accounts.lookup_transaction(verified, "c2", "TXN-9001", TODAY)["found"] is True  # status only, as anyone
     assert [e[2] for e in verified.events] == ["Verified caller looked up another customer's reference"]
 
@@ -66,7 +88,8 @@ def test_tickets_need_someone_to_follow_up_and_never_duplicate():
 
 def test_escalation_uses_verified_contact_links_a_ticket_and_logs_an_event():
     repo = FakeRepository()
-    accounts.lookup_customer(repo, "c1", "efua@accrastack.example", "AccraStack")
+    spoken.remember("c1", "That's efua at accrastack dot example, right?")
+    accounts.lookup_customer(repo, "c1", "efua@accrastack.example", "AccraStack", email_confirmed=True)
     result = cases.create_escalation(repo, "c1", "account", "Account restricted", NOW)
     escalation = repo.escalation_rows[0]
     assert (escalation["user_email"], escalation["verified"], escalation["ticket_id"]) == (
@@ -229,3 +252,37 @@ def test_a_failed_ticket_write_never_returns_a_ticket_id():
                                   lambda: cases.create_support_ticket(repo, "c1", "payment", "high", "x", "TXN-9004"),
                                   exclusive=True))
     assert result["error"] == "unavailable" and "ticket_id" not in result
+
+
+def test_a_lookup_that_needs_people_creates_the_escalation_or_ticket_itself():
+    form = FakeRepository()
+    form.ensure_conversation("c1", caller={"name": "Ada", "email": "ada@example.com"})
+    delayed = accounts.lookup_transaction(form, "c1", "TXN-9001", TODAY, NOW)  # processing, ETA passed
+    assert delayed["say"].startswith("I'm sorry, that payment") and delayed["escalation_id"]
+    assert form.escalation_rows[0]["user_email"] == "ada@example.com"  # contact from the form, nobody asked
+    assert form.ticket_rows[0]["reference"] == "TXN-9001" and "call back or an email" in delayed["next"]
+
+    failed = accounts.lookup_transaction(form, "c1", "TXN-9004", TODAY, NOW)  # failed transaction: a ticket
+    assert failed["ticket_id"] and "logged it" in failed["next"]
+
+    nobody = FakeRepository()  # no form, not verified: the lookup says to ask, then escalate
+    asked = accounts.lookup_transaction(nobody, "c2", "TXN-9001", TODAY, NOW)
+    assert "escalation_id" not in asked and "name and email" in asked["next"]
+
+
+def test_one_read_back_only_whoever_reads_it():
+    repo = FakeRepository()
+    repo.ensure_conversation("c1", caller={"name": "Ada", "email": "ada@example.com"})
+    cases.create_escalation(repo, "c1", "dispute", "Refund", NOW)
+    call = dict(contact_method="call", callback_day="tomorrow", callback_time="10am", callback_place="Lagos",
+                callback_phone="0814 346 3800")
+    spoken.remember("c1", "Just to confirm, the number is 0814-346-3800, tomorrow at 10. Is that right?")
+    done = cases.create_escalation(repo, "c1", "dispute", "Refund", NOW, phone_confirmed=True, **call)
+    assert "error" not in done  # Bex read it back herself and they agreed: no second read-back
+
+    other = FakeRepository()
+    other.ensure_conversation("c2", caller={"name": "Ada", "email": "ada@example.com"})
+    cases.create_escalation(other, "c2", "dispute", "Refund", NOW)
+    spoken.remember("c2", "Just to confirm, the number is 0814-346-3900?")  # she read out a different number
+    again = cases.create_escalation(other, "c2", "dispute", "Refund", NOW, phone_confirmed=True, **call)
+    assert again["error"] == "confirm_phone"  # what gets stored must be what the caller heard
