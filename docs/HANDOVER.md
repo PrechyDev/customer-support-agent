@@ -78,3 +78,8 @@ Expected: `metadataSendMode variable`, the header name `X-RelayPay-Secret` liste
 ## Handover prompt (paste into the new session)
 
 > I'm continuing my Koya Week 6 project: a RelayPay voice support agent. The repo is `customer-support-agent`. Read `CLAUDE.md`, then `docs/HANDOVER.md`, then the "▶ Next session" list at the top of `docs/BUILD_PLAN.md`, then `docs/SPECS.md`. Look through `src/` and `tests/` to confirm what exists, and run the tests. My decisions and reasons are in `../submission/REFLECTIONS_NOTES.md`, and the latency data is in `../submission/LATENCY_RESULTS.md`. Then tell me in a few lines where we are and what's next, and wait. Don't write code until I say so, and don't read my `.env`.
+
+
+## Frontend handoff prompt (paste into the new session)
+
+> I'm continuing my Koya Week 6 project: a RelayPay voice support agent. The repo is `customer-support-agent`. The backend is built and voice-tested; you're building the frontend. Read `CLAUDE.md`, then `docs/FRONTEND_PLAN.md` (the full plan: what's in and out of scope, the endpoints, migration, security rules, tests and build order), then `docs/HANDOVER.md` and `docs/SPECS.md` §3 and §6. The design is in `../design_handoff_relaypay_v1/` (its README is the spec) and the brand rules in `../RelayPay – Front-End Visual Brand Asset.md`. Run the tests first. Don't change the agent, tools or prompt. Don't read my `.env`, and never make real calls: I test by voice. Start with the voice page and form, explain each step briefly, and tell me when it's ready for a test call.

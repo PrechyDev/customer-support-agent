@@ -9,20 +9,17 @@ Last updated: 01-10-2026
 
 ---
 
-## ▶ Next session (start here): 01-10-2026
+## ▶ Next session (start here): 01-10-2026 (frontend)
 
-State: **Phase 3 is built and tested offline** (all 7 tools on Supabase, records, grounding check, pre-call form plumbing). 102 tests pass (+3 database tests, run with `RUN_DB_TESTS=1`, against the throwaway `test` schema). **Not yet voice-tested**: no real call has used the new tools.
+State: **backend done and voice-tested** (Phase 3 + fixes from 4 voice calls, commits `d63989b`, `322e9b7`). 112 tests pass.
+**The frontend is handed to a new session: follow `docs/FRONTEND_PLAN.md`** (scope in/out, endpoints, migration 005,
+security rules, tests, build order). Design source: `../design_handoff_relaypay_v1/` (README is the spec).
 
-1. [ ] **Vapi settings (commands in HANDOVER):** model `metadataSendMode: "variable"` (keep the headers), `analysisPlan.summaryPlan.enabled: true`, and confirm the silence hooks (60 s / 120 s) are saved.
-2. [ ] **Voice-test Phase 3 on Haiku**, with LOG_LEVEL=DEBUG: the test scenarios (status lookups TXN-9001 / TXN-9004 / PAY-7002, verification right and wrong, restricted account + frustration, failed invoice with no reference, callback "tomorrow afternoon, Lagos", an injection attempt, one unknown topic). Check the Supabase rows after each call and look for `grounded=False` in the log.
-3. [ ] Earlier open items: garbled words check (item below), model decision, `docs/vapi-assistant.json`.
-4. [ ] Show the Phase 3 decision-log entries (drafted in the session summary) and add them to the reflections notes.
-5. [ ] Deadline: **Friday 2 Oct, 12:00**. Then voice page with the form (Phase 6), deploy (Phase 7), console (Phase 8), evaluations and submission docs.
-
-Still open from the last session:
-- [ ] **Check the garbled words** seen in the Sonnet run ("A special. Will need…", "Delays. Specific. ally…"): compare `Sent to Vapi` with Vapi's transcript. Our text or Vapi's voice?
-- [ ] **Confirm the model decision** (provisionally Haiku 4.5, see `submission/LATENCY_RESULTS.md`), then set it in `.env.example` and the reflections notes.
-- [x] `LOG_FILE=logs/backend.log`, the "hold on" rule, "what the caller actually heard", Phase 2 Supabase.
+1. [ ] Voice page + pre-call form + live captions + greeting by name + outcome box + rating (FRONTEND_PLAN §3–§5.1)
+2. [ ] User test call through the page: form data reaches the call record (`relaypay-call`)
+3. [ ] Console: sign-in, Dashboard, Cases (resolve with note), Conversations, Customers, new-item ping (§3, §5.2–§5.3)
+4. [ ] Deploy (Phase 7), then the 9 test scenarios by voice (combined into ~3 calls), evidence, Loom, reflections, one-pager
+5. [ ] Open from earlier: model decision note, `docs/vapi-assistant.json`, Vapi `waitSeconds` 0.8 (optional)
 
 ## Phase 0: Planning docs
 - [x] Business rules agreed and logged in the decisions log
@@ -114,7 +111,7 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [ ] Rate limiting on public endpoints
 - [x] Attempt limits (verification, repeated sensitive requests)
 
-## Phase 6: Voice interface
+## Phase 6: Voice interface (plan: `docs/FRONTEND_PLAN.md`)
 - [ ] Voice page served by FastAPI, following `DESIGN.md`, with the pre-call form (name, email required; company and phone optional) sent as Vapi call metadata `{name, email, company}`
 - [ ] Vapi Web SDK with the public key only
 - [ ] States: idle, connecting, listening, agent speaking, ended, mic denied, error
@@ -127,7 +124,7 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [ ] Vapi Custom LLM URL switched from ngrok to Cloud Run
 - [ ] Link opens from another device or an incognito window
 
-## Phase 8: Support console
+## Phase 8: Support console (plan: `docs/FRONTEND_PLAN.md`; roles, assignment and analytics are out of scope)
 - [ ] Add the Claude Design mockup to `DESIGN.md`
 - [ ] Login (at least one shared login)
 - [ ] Recent conversations and their status

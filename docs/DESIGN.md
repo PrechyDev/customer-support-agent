@@ -1,5 +1,7 @@
 # Design
 
+> **01-10-2026: superseded for build purposes by `../../design_handoff_relaypay_v1/README.md`** (Claude Design handoff, high fidelity) and the scope in `docs/FRONTEND_PLAN.md`. Update the tokens below to the handoff's when the frontend is built.
+
 The visual and interaction design for the two screens: the **voice page** (for customers) and the **support console** (for RelayPay staff).
 
 Based on `../../aat-c3-week-6-support-agent-main/assets/brand-direction.md` and the PRD. **Mockups from Claude Design will be added below** (§6). Where a mockup and this doc disagree, update this doc to match the mockup.
