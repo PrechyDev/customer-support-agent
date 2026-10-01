@@ -76,36 +76,45 @@ follow the handoff's "Screen 1", with the copy changes in FRONTEND_PLAN §4.6.
 
 ---
 
-## 5. Support console (RelayPay staff)
+## 5. Support console (RelayPay staff): as built (01-10-2026)
 
-**Access:** behind a login (at least one shared login). It is never public, because it shows customer contact details.
+Served at `/console` (single page; `web/static/console/`). Plain HTML, CSS and JS modules, no build step. Layout
+follows the handoff's "Screen 2"; the API and the role rules are in `docs/CONSOLE_API.md` (the backend owns them).
 
-**Layout:** the logo at the **top-left**, a simple top bar, and content in cards and tables. No sidebar needed for the first version.
-
-**Sections (first version):**
-1. **Summary row:**
-   - total conversations
-   - escalated (count)
-   - open tickets
-   - open escalations
-2. **Recent conversations:** a table with time, customer (or "unverified"), channel, final status (answered, clarified, escalated, declined, abandoned) and a one-line summary. A row opens the conversation detail.
-3. **Conversation detail:**
-   - the turn-by-turn transcript
-   - tools used
-   - KB chunks used
-   - any linked ticket or escalation
-4. **Escalations:** reason, category, name, email, preferred callback time, call-booked flag, verified yes/no, status. This is what staff use to reach out to the customer.
-5. **Customers:** a list of seed customers and the calls we've had with each one.
-
-**New-item notification:**
-- A short, soft chime (not an alarm) plus a count badge on "Escalations" / "Tickets" when a new item arrives.
-- An **"Enable sound"** button in the top bar, because browsers block audio until the page is clicked. Once it's on, it shows "Sound on".
-- The badge clears when staff open the list.
-- Never sound alone: the badge makes it visible for anyone with sound off.
-
-**Not in the first version** (see Future improvements in the reflections notes): staff roles, assigning escalations or tickets, KB editing and approval.
-
-**Status badges:** a text label plus a muted colour from §2. Never colour alone.
+- **Access:** sign-in (email + password, HttpOnly cookie); accounts come from copy-link invites
+  (`/console/invite/<token>`, also used for password resets). "Forgot password?" says to ask an admin.
+  Roles: owner (superadmin), admin, support. The screens show only what a role may do; the backend checks again.
+- **Shell:** sidebar (Dashboard, Cases with the open count, Conversations, Customers, Analytics; Team for admins),
+  top bar with the page title, "Enable sound" and "Assistant online · N live". Below 900 px the sidebar becomes a
+  menu.
+- **Dashboard:** five KPIs, "Needs attention" (callback today, then unassigned, then oldest; support see only
+  their own and unassigned), five recent conversations.
+- **Cases:** one list of every case (an escalation and its ticket are one case; changed 01-10, see
+  `docs/FRONTEND_NOTE_CASES.md`), with Open / Mine / Unassigned / Resolved chips. Each row shows priority and how
+  it will be followed up: "Callback" + the window in the caller's local time, "Follow up by email", or "Logged"
+  (a ticket on its own: the team fixes it, no customer contact). Then owner, status, and Take / Resolve / Reopen.
+  A row opens the side panel (560 px, expandable; its own URL): handover summary with a link to the conversation,
+  activity timeline, internal notes, fields (callback, contact details, reference, the escalation's linked
+  ticket), customer card, related payment or payout. Resolve needs a note (dialog). Admins pick an owner.
+- **Conversations:** list with search and outcome chips; detail with summary, links to its cases and customer,
+  "What the assistant did" (tool calls and help-article searches), and the transcript. Under each reply, the
+  backend's check: "Not grounded" and "Phrase flag" stand out (amber), "Sources: …" is quiet, and routine notes
+  ("no facts stated") appear only with "Show all checks". A call still in progress shows "Live now".
+- **Customers:** list with search; profile with open cases, payments and payouts, conversations, account fields
+  and support notes.
+- **Analytics:** date range (presets + calendar, applied on Apply), KPIs, conversations per day/week/month, how
+  conversations ended (each call counted once, by its biggest outcome; a ticket with no escalation is "Logged for
+  the team"), questions the assistant couldn't answer.
+- **Paging:** Conversations, Cases and Customers show 25 at a time ("Showing 26–50 of 132", Previous / Next); the
+  page is in the URL, and a new search or filter goes back to page 1.
+- **Team:** invite (the link is shown once with a Copy button), resend, reset link, change role (owner only),
+  disable / enable.
+- **New-item ping:** for new escalations and tickets (not conversations). Checks every 30 s; an "N new" badge on
+  Cases, and a soft two-note chime with sound on. The sound button toggles: "Enable sound" → "Sound on" → "Sound
+  off"; the choice and the last check time are remembered, so a refresh doesn't ping again.
+- **Out (as decided):** recordings, "Flag for review", "Log callback", top topics, due dates and SLAs.
+- **Status badges:** a text label plus a muted colour (handoff mapping). Never colour alone. All API text is
+  inserted as text, never HTML.
 
 ---
 
