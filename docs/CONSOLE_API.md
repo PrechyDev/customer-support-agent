@@ -77,17 +77,36 @@ it is shown once, never stored in plain text.
 ```
 Support: `needs_attention` holds only their own and unassigned cases.
 
+## Pagination (added 01-10-2026; backend to build)
+
+`GET /conversations`, `GET /cases` and `GET /customers` take `page` (1-based, default 1) and `page_size`
+(default 25, max 100). The database returns only that page (LIMIT/OFFSET).
+
+- Each reply keeps its current keys and adds `"pagination": {"page": 2, "page_size": 25, "total": 132}`;
+  `total` = rows matching the current filter and search. `counts` (the chip numbers) are unchanged.
+- Order is stable so pages don't shift: conversations and cases newest first, then by ID; customers by company
+  name, then ID.
+- A page past the end returns an empty list with the real `total` (not a 404). A bad `page` or `page_size` →
+  `400 invalid_input`.
+- `case_row` gains `ticket_id` (an escalation's linked ticket; for a ticket, its own ID), so the case panel can
+  show the pair.
+- `GET /conversations` no longer takes `limit` (`page_size` replaces it).
+- The console shows a pager under each of the three lists ("Showing 26–50 of 132", Previous / Next); the page is
+  in the URL, and changing a search or filter goes back to page 1. Without `pagination` in a reply it shows no
+  pager, so it works before and after this change.
+
 ## Cases
 
 `case_row` = `{case_id, case_type: "escalation"|"ticket", title, category, priority, status, owner: {member_id,
 name}|null, customer_id, company, reference, callback: {spoken, start_utc}|null, contact_method, created_at,
 resolved_at, conversation_id}`. Status: `open` · `in progress` · `closed`.
-Escalations always link a ticket; the **Tickets** tab lists only tickets with no escalation (so nothing shows
-twice), and resolving an escalation closes its ticket too.
+An escalation always links a ticket, and the two are **one case**: it's listed once (as the escalation), and
+take, assign, resolve and reopen on the escalation apply to its ticket too. A ticket with no escalation is a
+case of its own. There are no separate Escalations / Tickets tabs: one Cases list, labelled per row.
 
 | Method + path | Body | Returns |
 |---|---|---|
-| `GET /cases?type=escalation|ticket&filter=open|mine|unassigned|resolved` | — | `{cases: [case_row…], counts: {open, mine, unassigned, resolved}}` |
+| `GET /cases?filter=open|mine|unassigned|resolved&page=&page_size=` (optional `type=escalation|ticket`) | — | `{cases: [case_row…], counts: {open, mine, unassigned, resolved}}`. **Without `type`: one list of every case, newest first** (an escalation and its ticket are one case, listed once as the escalation). Use `case_type` and `contact_method` on each row for its label |
 | `GET /cases/{type}/{case_id}` | — | `{case: case_row + {reason, summary, contact: {name, email (full, staff only), phone}, verified, preferred_time}, customer: {…}|null, related: {kind, reference, status, line}|null, conversation: {conversation_id, summary, started_at, duration_s}|null, timeline: [{when, who, kind, text}]}` |
 | `POST /cases/{type}/{case_id}/take` | — | `{case}` (unassigned only → owner = you, status in progress) |
 | `POST /cases/{type}/{case_id}/assign` | `{member_id}` | `{case}` (admin+) |
@@ -103,7 +122,7 @@ twice), and resolving an escalation closes its ticket too.
 
 | Method + path | Returns |
 |---|---|
-| `GET /conversations?search=&outcome=&limit=50` | `{conversations: [conversation_row…], counts: {all, answered, …}}` |
+| `GET /conversations?search=&outcome=&page=&page_size=` | `{conversations: [conversation_row…], counts: {all, answered, …}}` |
 | `GET /conversations/{id}` | `{conversation: row + {verified_customer_id, form: {name, email}}, transcript: [{when, speaker: "caller"|"assistant", text, answer_type, note}], actions: [{when, label, detail, ok}], cases: [case_row…], searches: [{query, chunks}]}` |
 
 `actions` are plain-language steps from tool calls ("Checked transaction TXN-9001", "Opened ticket T-1057",
@@ -113,7 +132,7 @@ twice), and resolving an escalation closes its ticket too.
 
 | Method + path | Returns |
 |---|---|
-| `GET /customers?search=` | `{customers: [{customer_id, company, contact_name, contact_email, plan, account_status, region, open_cases, calls}]}` |
+| `GET /customers?search=&page=&page_size=` | `{customers: [{customer_id, company, contact_name, contact_email, plan, account_status, region, open_cases, calls}]}` |
 | `GET /customers/{id}` | `{customer: {…, kyc_status, support_notes}, cases: [case_row…], conversations: [conversation_row…], transactions: [{transaction_id, type, amount, currency, status, created_at}], payouts: [{payout_id, transaction_id, amount, currency, status, scheduled_for}]}` |
 
 ## Analytics

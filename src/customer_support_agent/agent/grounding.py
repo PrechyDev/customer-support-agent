@@ -16,6 +16,7 @@ LOOKUP_TOOLS = ("lookup_customer", "lookup_transaction", "lookup_payout", "creat
 NOT_GROUNDED = "NOT GROUNDED"
 _NO_ANSWER = re.compile(r"(don't|do not) have|no information|not able to|can't (help|find|answer)|specialist",
                         re.IGNORECASE)
+_NO_INFO = re.compile(r"\b(don't|do not) have (any )?(information|details)\b|\bno information\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,16 @@ class Assessment:
 
 def _short(tool: str) -> str:
     return tool.rsplit("__", 1)[-1]
+
+
+def _declined_after_empty_search(result: TurnResult, answer_type: str, tools: list[str]) -> bool:
+    """An answer only counts with the stricter "I don't have information" wording, so a made-up answer that
+    happens to mention a specialist stays flagged NOT GROUNDED."""
+    if "search_knowledge_base" not in tools or result.kb_chunks or result.sources:
+        return False
+    if answer_type == "clarify":
+        return bool(_NO_ANSWER.search(result.text))
+    return answer_type == "answer" and bool(_NO_INFO.search(result.text))
 
 
 def assess(result: TurnResult | None, sent_text: str) -> Assessment:
@@ -41,6 +52,12 @@ def assess(result: TurnResult | None, sent_text: str) -> Assessment:
     unlabelled = "" if result.answer_type else "No answer type given; checked as an answer. "
     extra = f" Followed by a fixed line ({result.outcome})." if result.fallback else ""
 
+    if _declined_after_empty_search(result, answer_type, tools):
+        # "I don't have information on that. Would you like a specialist?" after a search found nothing is a
+        # decline, whatever the label (eval runs caught Haiku calling it clarify, and answer). The console's
+        # "questions we couldn't answer" list is built from declines, so it must be recorded as one.
+        return Assessment("decline", f"Declined after a knowledge base search that found nothing (labelled "
+                                     f"{answer_type}).{extra}", None)
     if answer_type == "answer":
         cited, found = set(result.sources), set(result.kb_chunks)
         if cited and cited <= found:
@@ -61,13 +78,6 @@ def assess(result: TurnResult | None, sent_text: str) -> Assessment:
     if answer_type == "escalate":
         done = "escalation recorded" if "create_escalation" in tools else "no escalation record created this turn"
         return Assessment("escalate", f"Escalation path; {done}.{extra}", None)
-    if (answer_type == "clarify" and "search_knowledge_base" in tools and not result.kb_chunks
-            and _NO_ANSWER.search(result.text)):
-        # "I don't have information on that. Would you like a specialist?" after a search found nothing is a
-        # decline, whatever the label (an eval run caught Haiku calling it clarify). The console's
-        # "questions we couldn't answer" list is built from declines, so it must be recorded as one.
-        return Assessment("decline", f"Declined after a knowledge base search that found nothing (labelled "
-                                     f"clarify).{extra}", None)
     if answer_type == "decline":
         searched = "after a knowledge base search" if "search_knowledge_base" in tools else "without a search"
         return Assessment("decline", f"Declined {searched}.{extra}", None)

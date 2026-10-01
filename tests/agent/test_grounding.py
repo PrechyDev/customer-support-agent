@@ -32,3 +32,7 @@ def test_other_paths_and_backend_lines_are_labelled_without_a_grounding_verdict(
     assert nothing_found.answer_type == "decline" and "found nothing" in nothing_found.note
     assert assess(turn(answer_type="clarify", tools_used=(KB,), kb_chunks=("fees",)), "").answer_type == "clarify"
     assert assess(turn(answer_type="clarify", tools_used=(KB,), text="Incoming or outgoing?"), "").answer_type == "clarify"
+    mislabelled = assess(turn(answer_type="answer", tools_used=(KB,), text="I don't have information on an app."), "")
+    assert (mislabelled.answer_type, mislabelled.grounded) == ("decline", None)
+    made_up = assess(turn(answer_type="answer", tools_used=(KB,), text="Yes, our app is free. A specialist can help."), "")
+    assert made_up.grounded is False  # an invented answer stays flagged

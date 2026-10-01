@@ -134,9 +134,13 @@ def test_case_ownership_flow_and_reads(env):
         assert esc in [c["case_id"] for c in listed["cases"]]
         tickets = support.get("/console/api/cases?type=ticket&filter=open").json()["cases"]
         assert ticket not in [c["case_id"] for c in tickets]  # an escalation's ticket isn't listed twice
+        everything = support.get("/console/api/cases?filter=unassigned").json()["cases"]  # one list, both kinds
+        assert esc in [c["case_id"] for c in everything] and ticket not in [c["case_id"] for c in everything]
 
         assert support.post(f"/console/api/cases/escalation/{esc}/take", headers=CSRF).json()["case"]["owner"]["member_id"] == support_id
         assert not store.update_case("escalation", esc, owner_id=support_id, only_if="unowned_open")  # 2nd take loses
+        taken = repo._run("select owner_id::text as owner, status from support_tickets where ticket_id = %s", (ticket,), "one")
+        assert taken == {"owner": support_id, "status": "in progress"}  # its ticket follows the escalation
         assert support.post(f"/console/api/cases/escalation/{esc}/reopen", headers=CSRF).status_code == 403
         assert support.post(f"/console/api/cases/escalation/{esc}/resolve", json={"note": ""}, headers=CSRF).status_code == 400
         done = support.post(f"/console/api/cases/escalation/{esc}/resolve", json={"note": "Called back, settled."},

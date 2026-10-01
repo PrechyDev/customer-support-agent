@@ -262,11 +262,12 @@ def console_router(store: ConsoleStore | None, settings: ConsoleSettings,
 
     # --- cases -----------------------------------------------------------------------------
     @router.get("/cases")
-    async def cases(request: Request, type: str = "escalation", filter: str = "open"):
+    async def cases(request: Request, type: str = "", filter: str = "open"):
+        """One list of cases: escalations and tickets together, unless a type is given."""
         actor = await signed_in(request)
-        if type not in CASE_TABLES or filter not in ("open", "mine", "unassigned", "resolved"):
+        if (type and type not in CASE_TABLES) or filter not in ("open", "mine", "unassigned", "resolved"):
             _fail(400, "invalid_input", "Unknown case type or filter.")
-        rows = await db(store.cases, case_type=type, limit=500)
+        rows = await db(store.cases, case_type=type or None, limit=500)
         groups = {"open": [r for r in rows if r["status"] != "closed"],
                   "mine": [r for r in rows if r["status"] != "closed" and r["owner_id"] == actor["member_id"]],
                   "unassigned": [r for r in rows if r["status"] != "closed" and not r["owner_id"]],
@@ -322,6 +323,12 @@ def console_router(store: ConsoleStore | None, settings: ConsoleSettings,
         await signed_in(request)
         return await case_detail(case_type, case_id)
 
+    def linked_ticket(case_type: str, case: dict, **fields: Any) -> dict | None:
+        """An escalation and its ticket are one case: whatever happens to one happens to the other."""
+        if case_type != "escalation" or not case.get("ticket_id"):
+            return None
+        return {"ticket_id": case["ticket_id"], **fields}
+
     async def act(case_type: str, case_id: str, actor: dict, kind: str, text: str, ticket: dict | None = None,
                   **update: Any) -> dict:
         """Updates the case (and its linked ticket) and writes the timeline entry. With only_if, a case that
@@ -341,8 +348,9 @@ def console_router(store: ConsoleStore | None, settings: ConsoleSettings,
         case = await load_case(case_type, case_id)
         if case["owner_id"] or case["status"] == "closed":
             _fail(409, "not_available", "This case already has an owner or is resolved.")
-        return await act(case_type, case_id, actor, "take", "Took the case.", owner_id=actor["member_id"],
-                         status="in progress", only_if="unowned_open")
+        ticket = linked_ticket(case_type, case, owner_id=actor["member_id"], status="in progress")
+        return await act(case_type, case_id, actor, "take", "Took the case.", ticket=ticket,
+                         owner_id=actor["member_id"], status="in progress", only_if="unowned_open")
 
     @router.post("/cases/{case_type}/{case_id}/assign")
     async def assign(request: Request, case_type: str, case_id: str):
@@ -353,8 +361,9 @@ def console_router(store: ConsoleStore | None, settings: ConsoleSettings,
         if not owner or owner["status"] != "active":
             _fail(400, "invalid_input", "Choose an active team member.")
         status = "in progress" if case["status"] != "closed" else None
+        ticket = linked_ticket(case_type, case, owner_id=owner["member_id"], status=status)
         return await act(case_type, case_id, actor, "assign", f"Assigned to {owner['name'] or owner['email']}.",
-                         owner_id=owner["member_id"], status=status)
+                         ticket=ticket, owner_id=owner["member_id"], status=status)
 
     @router.post("/cases/{case_type}/{case_id}/resolve")
     async def resolve(request: Request, case_type: str, case_id: str):
@@ -369,8 +378,7 @@ def console_router(store: ConsoleStore | None, settings: ConsoleSettings,
         if not 1 <= len(note) <= RESOLVE_MAX:
             _fail(400, "invalid_input", "Add a short note on how it was resolved.",
                   fields={"note": f"1 to {RESOLVE_MAX} characters."})
-        ticket = ({"ticket_id": case["ticket_id"], "status": "closed", "resolution_note": note}  # closes with it
-                  if case_type == "escalation" and case.get("ticket_id") else None)
+        ticket = linked_ticket(case_type, case, status="closed", resolution_note=note)
         return await act(case_type, case_id, actor, "resolve", f"Resolved: {note}", ticket=ticket, status="closed",
                          resolution_note=note, only_if="not_closed")
 
@@ -382,8 +390,7 @@ def console_router(store: ConsoleStore | None, settings: ConsoleSettings,
         if case["status"] != "closed":
             _fail(409, "not_resolved", "Only a resolved case can be reopened.")
         status = "in progress" if case["owner_id"] else "open"
-        ticket = ({"ticket_id": case["ticket_id"], "status": status, "reopen": True}
-                  if case_type == "escalation" and case.get("ticket_id") else None)
+        ticket = linked_ticket(case_type, case, status=status, reopen=True)
         return await act(case_type, case_id, actor, "reopen", "Reopened the case.", ticket=ticket, status=status,
                          reopen=True, only_if="closed")
 

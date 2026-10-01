@@ -426,6 +426,10 @@ scored the same way: `relaypay-eval --call <id> --scenario <key>`. About $0.02 p
 - Prompt: a payment problem with no reference gets one ask for the reference before a case is made; with the
   form's email and company, `lookup_customer` is called straight away.
 - Result: 13/13 on two runs in a row (01-10, runs 20261001-1914 and -1917).
+- Later the same day: a general fee question ended with "would you like a specialist?". The prompt now offers
+  a specialist only when the caller asks for a detail the KB doesn't have, and s1 checks for it. A decline
+  labelled `answer` ("I don't have information on…") after an empty search is also recorded as a decline.
+  13/13 again on runs 20261001-2012 and -2015.
 
 ---
 
@@ -455,5 +459,7 @@ scored the same way: `relaypay-eval --call <id> --scenario <key>`. About $0.02 p
   per email+address and 20 per address in 15 min; failures never say which part was wrong. Disabling someone, or
   their password changing, signs them out everywhere (session version).
 - **Cases:** support takes a case or is assigned one (admin), resolves their own with a note; admins resolve any
-  and reopen; every step is on the case timeline (`case_events`). Resolving an escalation closes its ticket.
+  and reopen; every step is on the case timeline (`case_events`). An escalation and its ticket are one case:
+  listed once, in one Cases list with tickets that have no escalation, and every action on the escalation
+  (take, assign, resolve, reopen) applies to its ticket too, so the two rows always agree.
 - **Single instance:** rate limits live in memory, so Cloud Run runs one instance (max-instances 1).

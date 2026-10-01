@@ -121,7 +121,7 @@ SCENARIOS: tuple[Scenario, ...] = (
              (Line("What fees does RelayPay charge for international payments?"),),
              (searched(), grounded(), said(r"corridor|currenc|payment method|recipient", "explains what fees depend on"),
               said(r"before", "says fees are shown before confirming"), never_said(EXACT_FEE, "no exact fee invented"),
-              no_case())),
+              never_said(r"specialist", "no specialist offered for a general question"), no_case())),
     Scenario("s2_clarify", "Clarifying question",
              "Asks which payment (incoming, payout or invoice) or for the reference; doesn't guess a status.",
              (Line("My payment is stuck."),),
