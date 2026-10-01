@@ -17,6 +17,19 @@ For the next Claude Code session. Read this, then `docs/BUILD_PLAN.md` ("▶ Nex
   - checks: 102 tests + 3 real-database tests (`RUN_DB_TESTS=1`, test schema only); a real-Supabase smoke test of every tool over MCP HTTP (no model, no Vapi; rows deleted). Tool times on the session pooler: lookups ~0.15 s, verification ~0.55 s, ticket ~0.45 s, escalation ~0.8 s.
 - **Not built yet:** log-only phrase check and rate limiting (Phase 5), voice page with the form (Phase 6), deploy (Phase 7), console (Phase 8), evaluations (Phase 9), submission docs (Phase 10).
 
+## Update 01-10-2026 (evening): console backend, production fixes, evaluations
+
+- **Console backend built and tested** (`console/`, `db/console_store.py`, `api/console.py`, migration 006 applied to
+  test and public). Contract for the frontend session: `docs/CONSOLE_API.md`. Rules: SPECS §14.
+  Create the owner account: `poetry run relaypay-admin --email you@example.com` (prints a 72 h setup link; `--reset`
+  for a new one). Needs `CONSOLE_SESSION_SECRET` (32+ characters) in `.env`.
+- **Production fixes:** `/health/ready` (database check), voice lookups rate-limited, background record writes
+  retried once (ERROR if lost), `LOG_FORMAT=json` for Cloud Run.
+- **Evaluations:** `poetry run relaypay-eval` (SPECS §12). Start a backend on the test schema first, e.g. in
+  PowerShell: `$env:DATABASE_SCHEMA="test"; $env:PORT="8100"; $env:MCP_PORT="8101"; poetry run relaypay-backend`,
+  then `$env:DATABASE_SCHEMA="test"; poetry run relaypay-eval --base-url http://127.0.0.1:8100`. 13/13 passed.
+  Score a voice call: `poetry run relaypay-eval --call <id> --scenario s4_transaction --schema public`.
+
 ## Test data vs real records
 
 - `public` schema = the real records (tickets start at T-1001). `test` schema = a throwaway copy with its own counters, created with `DATABASE_SCHEMA=test poetry run relaypay-db`.

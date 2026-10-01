@@ -1,5 +1,9 @@
 # Frontend build plan: voice page + support console
 
+> **Console update 01-10-2026:** the console's sign-in and data endpoints are now defined in `docs/CONSOLE_API.md`
+> (per-person accounts with roles, invites, case ownership, analytics). Where this plan says one shared login
+> (`CONSOLE_EMAIL` / `CONSOLE_PASSWORD`, §5.2–§5.3), CONSOLE_API.md replaces it.
+
 Written 01-10-2026 for the session that builds the frontend. The backend (agent, MCP tools, Supabase records) is
 built and tested: **don't change it** beyond the thin endpoints listed in §5 and the migration in §6.
 

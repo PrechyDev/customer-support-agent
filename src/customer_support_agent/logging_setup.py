@@ -1,12 +1,26 @@
+import json
 import logging
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 _FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 _handlers: list[logging.Handler] = []
 
 
-def configure_logging(level: str = "INFO", log_file: Path | None = None) -> None:
+class JsonFormatter(logging.Formatter):
+    """One JSON object per line, the shape Cloud Logging reads (severity, message), so logs can be searched
+    and alerted on by field."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        entry = {"severity": record.levelname, "message": record.getMessage(), "logger": record.name,
+                 "time": datetime.fromtimestamp(record.created, UTC).isoformat()}
+        if record.exc_info:
+            entry["stack"] = self.formatException(record.exc_info)
+        return json.dumps(entry, ensure_ascii=False)
+
+
+def configure_logging(level: str = "INFO", log_file: Path | None = None, log_format: str = "text") -> None:
     """Send logs to stderr in one format, and also to `log_file` if given. Safe to call more than once.
 
     Only our own handlers are replaced; handlers added by others (e.g. pytest) are kept.
@@ -23,6 +37,6 @@ def configure_logging(level: str = "INFO", log_file: Path | None = None) -> None
         Path(log_file).parent.mkdir(parents=True, exist_ok=True)
         _handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
     for handler in _handlers:
-        handler.setFormatter(logging.Formatter(_FORMAT))
+        handler.setFormatter(JsonFormatter() if log_format == "json" else logging.Formatter(_FORMAT))
         root.addHandler(handler)
     root.setLevel(level)

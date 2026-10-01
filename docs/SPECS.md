@@ -403,6 +403,29 @@ The 9 test scenarios from `test-scenarios.md`, plus:
 - **CUS-1003 note:** verify as Efua / AccraStack, then ask "why is my account restricted?" A pass means an escalation without the words "compliance review".
 - **Delayed:** TXN-9001 (processing, past ETA) is treated as delayed and escalated.
 - **Verification failure:** a wrong company twice leads to an escalation noting "identity not verified".
+- **Not in the KB:** "do you have a mobile app?" is declined, not guessed.
+
+**Runner (built 01-10):** `poetry run relaypay-eval` sends each scenario as text, in Vapi's request format, through
+the running backend (real agent, MCP tools and database), on the `test` schema only (it refuses `public`). Lines can
+depend on what the agent asked ("give the email only if asked"), so a script fits however the agent words things.
+Pass/fail comes from the call's **records** (tools, searches, tickets, escalations, events, verification, what was
+said), never from the model's own account. One row per scenario in `evaluations` with a run ID. A voice call is
+scored the same way: `relaypay-eval --call <id> --scenario <key>`. About $0.02 per scenario (Claude only).
+
+**What the first runs caught and the code now enforces (01-10):**
+- A reply written without `<say>` tags (6 of ~40 replies) was dropped and the caller heard "could you say that
+  again?". The Stop hook now asks the model once to write it inside the tags; untagged text is still never spoken.
+- A closing question written after `</say>` ("Is there anything else I can help with?") was dropped. A short
+  question (ends in "?", 20 words or fewer) after the last tag is now spoken; statements outside the tags are not.
+- One payout became two cases: the lookup escalated PAY-7002 as compliance, then the contact choice came in as
+  "payment". An escalation for a reference the call already escalated is now the same case, whatever the category.
+- "I don't have information on that, would you like a specialist?" after a search that found nothing was recorded
+  as `clarify`; it's now recorded as `decline`, so the console's unanswered-questions list is right.
+- A ticket nobody could follow up (no account, no reference) but with the pre-call form's name and email now
+  becomes an escalation in code; Bex had asked for a name the form already had.
+- Prompt: a payment problem with no reference gets one ask for the reference before a case is made; with the
+  form's email and company, `lookup_customer` is called straight away.
+- Result: 13/13 on two runs in a row (01-10, runs 20261001-1914 and -1917).
 
 ---
 
@@ -410,9 +433,27 @@ The 9 test scenarios from `test-scenarios.md`, plus:
 
 - ~~DB access from Python~~ **Decided 29-09-2026:** direct Postgres with `psycopg` over Supabase's **session pooler** (`DATABASE_URL`, port 5432, IPv4). There's no service role key and no `supabase-py`. RLS stays on for every table, with no policies, so Supabase's public REST API can't read anything.
 - Model: decided by the latency test (Haiku 4.5 vs Sonnet 5).
-- Support console login method (at minimum, one shared login).
+- ~~Support console login method~~ **Decided 01-10-2026:** per-person accounts with roles (§14).
 - **Business questions for RelayPay** (§6 currently assumes these):
   - What are the real support hours, and do they differ by region? (Assumed: Mon–Fri 08:00–18:00 UTC.)
   - Which public holidays apply? (Assumed: a flat calendar with no holidays.)
   - How many specialists are on shift, and how many callbacks can they handle per hour? (Assumed: a shared queue with no capacity limit.)
   - How should staff be notified of new tickets and escalations: email, Slack or Teams, a calendar? (Now: a console sound.)
+
+---
+
+## 14. Support console accounts (decided 01-10-2026; API: `docs/CONSOLE_API.md`)
+
+- **Roles:** superadmin (the owner; exactly one, created with `relaypay-admin`), admin, support. The superadmin
+  invites and manages admins and support; an admin invites and manages support only; nobody can change or disable
+  the superadmin; only the superadmin changes roles.
+- **Invites:** by email and role → status `pending` and a one-time link (72 h, copied by the admin; no email
+  service). Resending makes a new link and cancels the old one. Accepting sets name (2–80 characters) and password
+  (8–128, not the email, typed twice) and signs the person in. "Forgot password": an admin issues a reset link.
+- **Security:** scrypt password hashes; links stored only as SHA-256; signed HttpOnly SameSite=Strict session
+  cookie (12 h); every POST/PATCH needs the `X-Requested-With: relaypay-console` header; sign-in limited to 5 tries
+  per email+address and 20 per address in 15 min; failures never say which part was wrong. Disabling someone, or
+  their password changing, signs them out everywhere (session version).
+- **Cases:** support takes a case or is assigned one (admin), resolves their own with a note; admins resolve any
+  and reopen; every step is on the case timeline (`case_events`). Resolving an escalation closes its ticket.
+- **Single instance:** rate limits live in memory, so Cloud Run runs one instance (max-instances 1).

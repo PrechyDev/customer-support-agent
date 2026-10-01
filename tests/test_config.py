@@ -69,6 +69,9 @@ def test_database_schema_defaults_to_public_and_rejects_unsafe_names():
 
 
 def test_log_file_is_read_from_the_environment():
+    assert load_settings(BASE).log_format == "text" and load_settings({**BASE, "LOG_FORMAT": "JSON"}).log_format == "json"
+    with pytest.raises(ConfigError, match="LOG_FORMAT"):
+        load_settings({**BASE, "LOG_FORMAT": "xml"})
     assert load_settings(BASE).log_file is None
     assert load_settings({**BASE, "LOG_FILE": "logs/backend.log"}).log_file == Path("logs/backend.log")
 

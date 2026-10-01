@@ -26,6 +26,8 @@ relaypay-mcp = "customer_support_agent.mcp_server.__main__:main"
 relaypay-backend = "customer_support_agent.api.__main__:main"
 relaypay-db = "customer_support_agent.db.setup:main"
 relaypay-call = "customer_support_agent.db.inspect_call:main"
+relaypay-admin = "customer_support_agent.db.admin_cli:main"
+relaypay-eval = "customer_support_agent.evals.runner:main"
 
 [tool.poetry]
 packages = [{ include = "customer_support_agent", from = "src" }]

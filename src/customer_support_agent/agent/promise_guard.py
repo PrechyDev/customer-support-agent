@@ -7,6 +7,11 @@ decision "block" makes it continue with our reason (docs: code.claude.com/docs/e
 
 Blocks only when the reply promises a follow-up AND the call has no escalation, and only once per turn
 (stop_hook_active): the second time it lets the turn end and logs an event for staff, so it can never loop.
+
+The same hook catches a reply written without <say> tags (6 of 40 replies in the first eval run, 01-10):
+nothing outside the tags is spoken, so the caller would only hear "could you say that again?". It asks the
+model once to write the reply inside the tags; the untagged text itself is never spoken, because untagged
+text is where Haiku's reasoning leaked in a real call.
 """
 
 import asyncio
@@ -33,6 +38,12 @@ BLOCK_REASON = (
 )
 
 
+UNTAGGED_REASON = (
+    "Your reply wasn't inside <say> tags, so the caller heard nothing. Write your reply to the caller again, "
+    'inside <say type="..."></say>. Do not repeat tool calls you have already made.'
+)
+
+
 def promises_follow_up(text: str) -> bool:
     return bool(PROMISE.search(text or ""))
 
@@ -42,7 +53,17 @@ def make_stop_hook(repo: Any, conversation_id: str, spoken_now: Callable[[], str
     hook's own last_assistant_message field)."""
 
     async def guard(input_data: dict, tool_use_id: str | None, context: Any) -> dict:
-        text = f"{input_data.get('last_assistant_message') or ''} {spoken_now()}"
+        last, said = input_data.get("last_assistant_message") or "", spoken_now()
+        promised = await promise_check(input_data, f"{last} {said}")
+        if promised or input_data.get("stop_hook_active"):
+            return promised
+        if last.strip() and not said.strip() and "<say" not in last and "<end_call" not in last:
+            logger.warning("Reply had no <say> tags: asking the agent to write it again (conversation=%s)",
+                           conversation_id)
+            return {"decision": "block", "reason": UNTAGGED_REASON}
+        return {}
+
+    async def promise_check(input_data: dict, text: str) -> dict:
         if repo is None or not promises_follow_up(text):
             return {}
         try:

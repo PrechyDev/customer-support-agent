@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from customer_support_agent.api.web import mount_web, voice_router
+from customer_support_agent.api.web import CALL_LOOKUPS_PER_MINUTE, mount_web, voice_router
 from customer_support_agent.config import VoiceSettings
 from tests.mcp_server.fake_repo import FakeRepository
 
@@ -89,3 +89,12 @@ def test_rating_is_saved_once():
     assert c.post("/voice/calls/call-1/rating", json={"helpful": "yes"}).status_code == 422
     later = client(repo, now=lambda: datetime.now(UTC) + timedelta(hours=3))
     assert later.post("/voice/calls/call-1/rating", json={"helpful": True}).status_code == 404
+
+
+def test_call_lookups_are_rate_limited_per_client():
+    repo = FakeRepository()
+    call_with(repo, "call-1")
+    c = client(repo)
+    codes = [c.get("/voice/calls/call-1/outcome").status_code for _ in range(CALL_LOOKUPS_PER_MINUTE + 1)]
+    assert codes[:-1] == [200] * CALL_LOOKUPS_PER_MINUTE and codes[-1] == 429
+    assert client(repo).get("/voice/calls/call-1/outcome").status_code == 200  # separate limiter per app

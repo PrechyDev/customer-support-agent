@@ -53,6 +53,9 @@ class Repository:
             logger.warning("Database call failed: %s", type(exc).__name__)
             raise RepositoryUnavailable(str(exc)) from exc
 
+    def ping(self) -> None:
+        self._run("select 1")
+
     # --- conversations -------------------------------------------------------------------
     def ensure_conversation(self, cid: str, model: str | None = None, caller: dict | None = None) -> dict:
         """Creates the call's row if needed and returns it (one round trip for both)."""

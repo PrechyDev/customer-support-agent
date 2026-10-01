@@ -85,6 +85,12 @@ def test_tickets_need_someone_to_follow_up_and_never_duplicate():
     assert repo.ticket_rows[0]["customer_id"] == "CUS-1003"  # owner taken from the record, not the model
     assert cases.create_support_ticket(repo, "c1", "money", "high", "x")["error"] == "invalid_input"
 
+    form = FakeRepository()  # no account and no reference, but the form says who to contact: escalated in code
+    form.ensure_conversation("c3", caller={"name": "Ada", "email": "ada@example.com"})
+    made = cases.create_support_ticket(form, "c3", "payment", "high", "Invoice failed", now=NOW)
+    assert made["escalation_id"] and made["ticket_id"] and "Don't ask for their name" in made["next"]
+    assert form.escalation_rows[0]["user_email"] == "ada@example.com"
+
 
 def test_escalation_uses_verified_contact_links_a_ticket_and_logs_an_event():
     repo = FakeRepository()
@@ -268,6 +274,12 @@ def test_a_lookup_that_needs_people_creates_the_escalation_or_ticket_itself():
     nobody = FakeRepository()  # no form, not verified: the lookup says to ask, then escalate
     asked = accounts.lookup_transaction(nobody, "c2", "TXN-9001", TODAY, NOW)
     assert "escalation_id" not in asked and "name and email" in asked["next"]
+
+    # the caller then picks email, and the model files it under another category: still the same case
+    choice = cases.create_escalation(form, "c1", "dispute", "payout delayed", NOW, reference="TXN-9001",
+                                     contact_method="email")
+    assert choice["escalation_id"] == delayed["escalation_id"] and choice["created"] is False
+    assert len(form.escalation_rows) == 1
 
 
 def test_one_read_back_only_whoever_reads_it():

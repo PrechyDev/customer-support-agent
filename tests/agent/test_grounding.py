@@ -28,3 +28,7 @@ def test_other_paths_and_backend_lines_are_labelled_without_a_grounding_verdict(
     assert "escalation recorded" in escalated.note and "no escalation record" in only_promised.note
     assert (fixed_line.answer_type, cut_off.answer_type) == ("fallback", "answer")
     assert assess(turn(answer_type="decline"), "").answer_type == "decline"
+    nothing_found = assess(turn(answer_type="clarify", tools_used=(KB,), text="I don't have that. A specialist?"), "")  # "I don't have that. A specialist?"
+    assert nothing_found.answer_type == "decline" and "found nothing" in nothing_found.note
+    assert assess(turn(answer_type="clarify", tools_used=(KB,), kb_chunks=("fees",)), "").answer_type == "clarify"
+    assert assess(turn(answer_type="clarify", tools_used=(KB,), text="Incoming or outgoing?"), "").answer_type == "clarify"

@@ -36,7 +36,7 @@ def main() -> int:
     except ConfigError as exc:
         logger.error("MCP server not started: %s", exc)
         return EXIT_CONFIG_ERROR
-    configure_logging(settings.log_level, settings.log_file)
+    configure_logging(settings.log_level, settings.log_file, settings.log_format)
 
     try:
         kb = KnowledgeBase.from_file(settings.kb_path)

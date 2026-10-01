@@ -28,6 +28,7 @@ class Settings:
     mcp_auth_token: str
     log_level: str
     log_file: Path | None = None  # optional copy of the log, for local testing
+    log_format: str = "text"  # "json" on Cloud Run (one JSON object per line, read by Cloud Logging)
 
     def __repr__(self) -> str:  # keep the token out of logs and tracebacks
         return (
@@ -44,6 +45,13 @@ def _port_named(value: str, name: str) -> int:
     if not 1 <= port <= 65535:
         raise ConfigError(f"{name} must be between 1 and 65535, got {port}")
     return port
+
+
+def _log_format(env: Mapping[str, str]) -> str:
+    value = env.get("LOG_FORMAT", "text").strip().lower() or "text"
+    if value not in ("text", "json"):
+        raise ConfigError(f"LOG_FORMAT must be text or json, got '{value}'")
+    return value
 
 
 def _port(value: str) -> int:
@@ -87,6 +95,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         mcp_auth_token=token,
         log_level=log_level,
         log_file=Path(env["LOG_FILE"]) if env.get("LOG_FILE", "").strip() else None,
+        log_format=_log_format(env),
     )
 
 
@@ -157,6 +166,28 @@ def load_voice_settings(env: Mapping[str, str] | None = None) -> VoiceSettings:
     env = os.environ if env is None else env
     return VoiceSettings(public_key=env.get("VAPI_PUBLIC_KEY", "").strip() or None,
                          assistant_id=env.get("VAPI_ASSISTANT_ID", "").strip() or None)
+
+
+@dataclass(frozen=True)
+class ConsoleSettings:
+    """The support console. Without a session secret it's switched off (503) and the voice page still works."""
+    session_secret: str | None
+    public_base_url: str | None  # for invite links, e.g. https://support.example.com; else taken from the request
+
+    def __repr__(self) -> str:
+        return f"ConsoleSettings(session_secret={'***' if self.session_secret else None}, " \
+               f"public_base_url={self.public_base_url})"
+
+
+def load_console_settings(env: Mapping[str, str] | None = None) -> ConsoleSettings:
+    env = os.environ if env is None else env
+    secret = env.get("CONSOLE_SESSION_SECRET", "").strip()
+    if secret and len(secret) < MIN_TOKEN_LENGTH:
+        raise ConfigError(f"CONSOLE_SESSION_SECRET must be at least {MIN_TOKEN_LENGTH} characters")
+    base = env.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if base and not base.startswith(("https://", "http://")):
+        raise ConfigError("PUBLIC_BASE_URL must start with https:// (or http:// for local testing)")
+    return ConsoleSettings(session_secret=secret or None, public_base_url=base or None)
 
 
 def load_agent_settings(env: Mapping[str, str] | None = None) -> AgentSettings:

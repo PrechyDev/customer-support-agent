@@ -40,6 +40,9 @@ class FakeRepository:
         if self.down:
             raise RepositoryUnavailable("database down")
 
+    def ping(self):
+        self._check()
+
     def ensure_conversation(self, cid, model=None, caller=None):
         self._check()
         conv = self.conversations.setdefault(cid, {"conversation_id": cid, "verification_attempts": 0,

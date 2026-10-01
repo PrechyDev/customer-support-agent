@@ -62,7 +62,7 @@ def _ticket_customer(repo: Any, conversation: dict, reference: str) -> str | Non
 
 
 def create_support_ticket(repo: Any, cid: str, category: str, priority: str, summary: str,
-                          reference: str | None = None) -> dict[str, Any]:
+                          reference: str | None = None, now: datetime | None = None) -> dict[str, Any]:
     if category not in TICKET_CATEGORIES:
         return error("invalid_input", f"category must be one of: {', '.join(TICKET_CATEGORIES)}.")
     if priority not in PRIORITIES:
@@ -79,6 +79,14 @@ def create_support_ticket(repo: Any, cid: str, category: str, priority: str, sum
     if existing:
         return {"ticket_id": existing["ticket_id"], "status": existing["status"], "created": False}
     customer_id = _ticket_customer(repo, conversation, ref)
+    if customer_id is None and now is not None and conversation.get("caller_name") and conversation.get("caller_email"):
+        # Nobody on file to follow up a ticket, but the pre-call form says who to contact: escalate in code
+        # (an eval caught Bex asking for a name the form already had, after needs_contact).
+        made = create_escalation(repo, cid, category, summary, now, reference=reference)
+        if "escalation_id" in made:
+            return {**made, "next": "Say you've passed it to a specialist, then ask whether they'd like a call back "
+                                    "or an email. Don't ask for their name or email: the form has them."}
+        return made
     if customer_id is None:
         return error("needs_contact", "Nobody could follow up on this: use create_escalation with the caller's "
                                       "name and email instead (it creates the ticket too).")
@@ -187,6 +195,11 @@ def create_escalation(repo: Any, cid: str, category: str, reason: str, now: date
 
     escalations = repo.escalations(cid)
     existing = next((e for e in escalations if e["category"] == category), None)
+    if existing is None and ref and escalations:
+        # The same payment under another category is the same case (found in an eval: a lookup escalated
+        # PAY-7002 as compliance, then the model added the contact choice as "payment" and made a second case).
+        same_ref = {t["ticket_id"] for t in repo.tickets(cid) if t.get("reference") == ref}
+        existing = next((e for e in escalations if e["ticket_id"] in same_ref), None)
     if existing:  # a repeat, or adding how they'd like to be contacted
         if callback:
             repo.set_callback(existing["escalation_id"], callback)

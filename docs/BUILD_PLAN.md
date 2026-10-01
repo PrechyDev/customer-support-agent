@@ -108,7 +108,10 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [x] Log-only phrase check (flags go in the turn's confidence note)
 - [x] Vapi end-of-call webhook: closes the agent session and the conversation record (Vapi's summary, final status), `abandoned` if it never arrives (idle cleanup)
 - [x] Vapi call-started webhook: start the agent session while the greeting plays (built early, with the latency fixes)
-- [ ] Rate limiting on public endpoints
+- [x] Rate limiting on public endpoints (console sign-in and links; voice outcome/rating 60/min per IP; in memory, single instance)
+- [x] `/health/ready` checks the database (2 s, 503 when down); `/health` stays a cheap liveness check
+- [x] Background record writes retried once; a record finally lost is an ERROR log
+- [x] `LOG_FORMAT=json` for Cloud Logging
 - [x] Attempt limits (verification, repeated sensitive requests)
 
 ## Phase 6: Voice interface (plan: `docs/FRONTEND_PLAN.md`)
@@ -126,7 +129,12 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [ ] Vapi Custom LLM URL switched from ngrok to Cloud Run
 - [ ] Link opens from another device or an incognito window
 
-## Phase 8: Support console (plan: `docs/FRONTEND_PLAN.md`; roles, assignment and analytics are out of scope)
+## Phase 8: Support console (API contract: `docs/CONSOLE_API.md`; scope widened 01-10: roles, assignment, analytics)
+- [x] Backend: per-person accounts (superadmin / admin / support), invite and reset links (72 h, copy-link, no email
+  service), scrypt passwords, signed session cookie, CSRF header, sign-in rate limits, migration 006 (test + public)
+- [x] Backend: case flow (take, assign, resolve with note, reopen, notes, timeline), conversations, customers,
+  summary, analytics, new-item poll; `relaypay-admin` creates the superadmin
+- [ ] Frontend session builds the console screens against `docs/CONSOLE_API.md`
 - [ ] Add the Claude Design mockup to `DESIGN.md`
 - [ ] Login (at least one shared login)
 - [ ] Recent conversations and their status
@@ -135,8 +143,9 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [ ] New ticket/escalation ping: poll every 30s, sound + badge, "Enable sound" button, no repeat pings after refresh
 
 ## Phase 9: Evaluations
-- [ ] Evaluation runner that writes to `evaluations`
-- [ ] 9 scenarios + injection + CUS-1003 note + delayed + verification failure (SPECS §12)
+- [x] Evaluation runner that writes to `evaluations` (`poetry run relaypay-eval`; text through the real backend, test schema)
+- [x] 9 scenarios + injection + CUS-1003 note + delayed + verification failure + not-in-KB (SPECS §12): 13/13 on 01-10
+- [ ] Score the voice test calls with `relaypay-eval --call <id> --scenario <key>`
 - [ ] Voice run of every scenario, with Supabase records that match
 
 ## Phase 10: Submission

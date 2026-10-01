@@ -77,7 +77,7 @@ def create_mcp_server(kb: KnowledgeBase, log_store: RetrievalLogStore, repo: Any
                                     reference: str | None = None) -> dict[str, Any]:
         cid = ready(ctx)
         return await run_tool(repo, cid, "create_support_ticket", "log a problem", f"{category}/{priority} ref={reference}",
-                              lambda: cases.create_support_ticket(repo, cid, category, priority, summary, reference),
+                              lambda: cases.create_support_ticket(repo, cid, category, priority, summary, reference, now()),
                               exclusive=True)
 
     @server.tool(description=cases.CREATE_ESCALATION)

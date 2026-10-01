@@ -6,6 +6,7 @@ returned by this turn's knowledge base search, or it came from an account lookup
 else is flagged NOT GROUNDED so it stands out when reviewing calls.
 """
 
+import re
 from dataclasses import dataclass
 
 from customer_support_agent.agent.session import TurnResult
@@ -13,6 +14,8 @@ from customer_support_agent.agent.session import TurnResult
 # Tools whose result the caller can be told directly (a status, a ticket or escalation confirmation).
 LOOKUP_TOOLS = ("lookup_customer", "lookup_transaction", "lookup_payout", "create_support_ticket", "create_escalation")
 NOT_GROUNDED = "NOT GROUNDED"
+_NO_ANSWER = re.compile(r"(don't|do not) have|no information|not able to|can't (help|find|answer)|specialist",
+                        re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -58,6 +61,13 @@ def assess(result: TurnResult | None, sent_text: str) -> Assessment:
     if answer_type == "escalate":
         done = "escalation recorded" if "create_escalation" in tools else "no escalation record created this turn"
         return Assessment("escalate", f"Escalation path; {done}.{extra}", None)
+    if (answer_type == "clarify" and "search_knowledge_base" in tools and not result.kb_chunks
+            and _NO_ANSWER.search(result.text)):
+        # "I don't have information on that. Would you like a specialist?" after a search found nothing is a
+        # decline, whatever the label (an eval run caught Haiku calling it clarify). The console's
+        # "questions we couldn't answer" list is built from declines, so it must be recorded as one.
+        return Assessment("decline", f"Declined after a knowledge base search that found nothing (labelled "
+                                     f"clarify).{extra}", None)
     if answer_type == "decline":
         searched = "after a knowledge base search" if "search_knowledge_base" in tools else "without a search"
         return Assessment("decline", f"Declined {searched}.{extra}", None)

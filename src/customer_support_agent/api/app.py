@@ -24,7 +24,10 @@ from customer_support_agent.api.heard import heard_note
 from customer_support_agent.api.openai_format import RequestError, completion, parse_request, sse_chunk, sse_done
 from customer_support_agent.api.records import CallRecorder
 from customer_support_agent.api.web import mount_web
-from customer_support_agent.config import VoiceSettings
+from customer_support_agent.api.console import mount_console
+from customer_support_agent.config import ConsoleSettings, VoiceSettings
+from customer_support_agent.db.console_store import ConsoleStore
+from customer_support_agent.db.repository import RepositoryUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +71,7 @@ def create_app(manager: Manager, vapi_secret: str,
                reassure_after: float = fallbacks.REASSURANCE_AFTER_SECONDS,
                filler_wait: float = fallbacks.FILLER_WAIT_SECONDS,
                recorder: CallRecorder | None = None, voice: VoiceSettings | None = None,
+               console: ConsoleSettings | None = None,
                repo: Any | None = None) -> FastAPI:
     recorder = recorder or CallRecorder(None)  # no database: nothing is recorded, calls still work
 
@@ -98,7 +102,20 @@ def create_app(manager: Manager, vapi_secret: str,
 
     @app.get("/health")
     async def health() -> dict[str, str]:
+        """Liveness: the process is up. Cheap, so a database outage doesn't make Cloud Run restart us."""
         return {"status": "ok"}
+
+    @app.get("/health/ready")
+    async def ready():
+        """Readiness: the database answers within 2 s."""
+        if repo is None:
+            return JSONResponse({"status": "degraded", "database": "not configured"}, status_code=503)
+        try:
+            await asyncio.wait_for(asyncio.to_thread(repo.ping), timeout=2)
+            return {"status": "ok", "database": "ok"}
+        except (RepositoryUnavailable, TimeoutError):
+            logger.warning("Readiness check failed: database unavailable")
+            return JSONResponse({"status": "degraded", "database": "unavailable"}, status_code=503)
 
     @app.post("/chat/completions")
     async def chat_completions(request: Request):
@@ -212,6 +229,8 @@ def create_app(manager: Manager, vapi_secret: str,
         return {"ok": True}
 
     mount_web(app, voice or VoiceSettings(None, None), repo)  # the voice page and its API
+    mount_console(app, ConsoleStore(repo) if repo is not None else None,
+                  console or ConsoleSettings(None, None))  # the support console and its API
     return app
 
 

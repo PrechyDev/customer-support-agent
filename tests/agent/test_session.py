@@ -53,6 +53,15 @@ def test_reasoning_outside_say_tags_is_never_spoken():
     assert spoken(collect(AgentSession(client, "call-1", turn_timeout_seconds=5))) == "Sounds good. Anything else I can help with?"
 
 
+def test_a_closing_question_after_the_tags_is_kept_but_statements_are_not():
+    raw = "<say>That payout is being reviewed.</say> Is there anything else I can help you with?"
+    client = FakeClient([[*reply(raw, say=False), result()]])
+    assert spoken(collect(AgentSession(client, "c", turn_timeout_seconds=5))) == (
+        "That payout is being reviewed. Is there anything else I can help you with?")
+    client = FakeClient([[*reply("<say>Done.</say> I should now ask if they need more.", say=False), result()]])
+    assert spoken(collect(AgentSession(client, "c", turn_timeout_seconds=5))) == "Done."
+
+
 def test_a_reply_without_say_tags_speaks_nothing():
     client = FakeClient([[*reply("I forgot the tags.", say=False), result()]])
     turn = collect(AgentSession(client, "call-1", turn_timeout_seconds=5))[-1]

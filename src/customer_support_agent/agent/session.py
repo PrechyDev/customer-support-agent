@@ -40,6 +40,7 @@ _ATTR = re.compile(r'(\w+)\s*=\s*"([^"]*)"')
 ANSWER_TYPES = ("answer", "clarify", "escalate", "decline")
 _CHUNK_ID = re.compile(r'"chunk_id"\s*:\s*"([^"]+)"')  # only the knowledge base tool returns these
 _END_CALL = "<end_call"
+_MAX_QUESTION_WORDS = 20
 # The word Vapi hangs up on (fallbacks.END_CALL_PHRASE / endCallPhrases). The model's own words must
 # never contain it: only the backend's fixed ending lines do.
 _HANGUP_PHRASES = ((re.compile(r"\bgood-?bye\b", re.IGNORECASE), "bye for now"),)
@@ -61,6 +62,17 @@ def say_text(raw: str, final: bool) -> str:
     if not final and "<" in text[-7:]:
         text = text[: text.rfind("<")]
     return text.strip()
+
+
+def trailing_question(raw: str) -> str:
+    """A short question written after the last </say> ("<say>Done.</say> Anything else?"). The model
+    sometimes puts its closing question outside the tags; reasoning is statements, so only a question is kept."""
+    if "</say>" not in raw:
+        return ""
+    tail = raw.rsplit("</say>", 1)[1].strip()
+    if not tail.endswith("?") or "<" in tail or len(tail.split()) > _MAX_QUESTION_WORDS:
+        return ""
+    return tail
 
 
 def say_labels(raw: str) -> tuple[str | None, tuple[str, ...]]:
@@ -192,13 +204,17 @@ class _Turn:
         if _END_CALL in self._raw:
             self.end_requested = True
         spoken = say_text(self._raw, final=True)
+        question = trailing_question(self._raw) if spoken and not self.end_requested else ""
+        if question:
+            logger.info("Kept a closing question written after </say> (conversation=%s)", self._conversation_id)
+            spoken = f"{spoken} {question}"
         if spoken:
             answer_type, sources = say_labels(self._raw)
             self.answer_type = answer_type or self.answer_type
             self.sources += [s for s in sources if s not in self.sources]
         if self._raw.strip() and not spoken and not self.end_requested:
             logger.warning("Model reply had no <say> text; nothing spoken (conversation=%s)", self._conversation_id)
-        outside = _SAY.sub("", self._raw).strip()
+        outside = _SAY.sub("", self._raw).replace(question, "").strip()
         if outside:
             logger.debug("Dropped text outside <say> (conversation=%s): %r", self._conversation_id, outside)
         events = self._speak(spoken[self._sent:])

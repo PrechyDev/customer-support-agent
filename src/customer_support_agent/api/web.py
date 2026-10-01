@@ -11,11 +11,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, StrictBool
 
+from customer_support_agent.api.ratelimit import RateLimiter, client_ip
 from customer_support_agent.config import VoiceSettings
 from customer_support_agent.db.repository import RepositoryUnavailable
 from customer_support_agent.domain.callbacks import CallbackError, spoken_window
@@ -61,12 +62,19 @@ def outcome_from_record(row: dict) -> dict:
     return out
 
 
+CALL_LOOKUPS_PER_MINUTE = 60  # a page polls the outcome a few times per call
+
+
 def voice_router(voice: VoiceSettings, repo: Any | None = None,
                  now: Callable[[], datetime] = lambda: datetime.now(UTC)) -> APIRouter:
     router = APIRouter()
+    limiter = RateLimiter(limit=CALL_LOOKUPS_PER_MINUTE, window_seconds=60)  # these are public: stop guessing/flooding
 
-    async def recent_call(call_id: str) -> dict | JSONResponse:
+    async def recent_call(call_id: str, request: Request) -> dict | JSONResponse:
         """The call's outcome row, or the error response: 404 unless it started in the last 2 hours."""
+        if limiter.hit(client_ip(request)):
+            logger.warning("Voice call lookups rate-limited for one client")
+            return _error(429, "too_many_requests")
         if repo is None:
             return _error(503, "records_unavailable")
         if not CALL_ID.fullmatch(call_id):
@@ -92,13 +100,13 @@ def voice_router(voice: VoiceSettings, repo: Any | None = None,
         return {"publicKey": voice.public_key, "assistantId": voice.assistant_id}
 
     @router.get("/voice/calls/{call_id}/outcome")
-    async def call_outcome(call_id: str):
-        row = await recent_call(call_id)
+    async def call_outcome(call_id: str, request: Request):
+        row = await recent_call(call_id, request)
         return row if isinstance(row, JSONResponse) else outcome_from_record(row)
 
     @router.post("/voice/calls/{call_id}/rating")
-    async def rate_call(call_id: str, rating: Rating):
-        row = await recent_call(call_id)
+    async def rate_call(call_id: str, rating: Rating, request: Request):
+        row = await recent_call(call_id, request)
         if isinstance(row, JSONResponse):
             return row
         try:

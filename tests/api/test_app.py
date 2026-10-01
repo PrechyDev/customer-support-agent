@@ -133,6 +133,14 @@ def test_rejects_bad_secret_and_bad_body_and_serves_health():
     assert manager.asked == []
 
 
+def test_readiness_checks_the_database():
+    ready = lambda repo: TestClient(create_app(FakeManager(), vapi_secret=SECRET, repo=repo)).get("/health/ready")
+    assert ready(FakeRepository()).json() == {"status": "ok", "database": "ok"}
+    down = ready(FakeRepository(down=True))
+    assert down.status_code == 503 and down.json()["database"] == "unavailable"
+    assert ready(None).status_code == 503
+
+
 def test_secret_in_custom_header_is_accepted_even_with_a_foreign_authorization():
     """Shared Vapi org: Authorization carries the org's key, our secret comes in X-RelayPay-Secret."""
     manager = FakeManager()

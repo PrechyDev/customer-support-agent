@@ -7,12 +7,15 @@ then say so). Without a repository (no DATABASE_URL), nothing is written.
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 from typing import Any
 
 from customer_support_agent.db.repository import RepositoryUnavailable
 
 logger = logging.getLogger(__name__)
+
+RETRY_SECONDS = 0.5
 
 
 class CallRecorder:
@@ -57,12 +60,19 @@ class CallRecorder:
             return
 
         def run() -> None:
-            try:
-                work()
-            except RepositoryUnavailable:
-                logger.warning("Could not record call %s: database unavailable (conversation=%s)", what, cid)
-            except Exception:
-                logger.exception("Could not record call %s (conversation=%s)", what, cid)
+            for attempt in (1, 2):  # one retry: a pooler hiccup shouldn't lose a record
+                try:
+                    work()
+                    return
+                except RepositoryUnavailable:
+                    if attempt == 1:
+                        time.sleep(RETRY_SECONDS)
+                        continue
+                    logger.error("Lost a call record (%s): database unavailable after a retry (conversation=%s)",
+                                 what, cid)
+                except Exception:
+                    logger.exception("Lost a call record (%s) (conversation=%s)", what, cid)
+                    return
 
         try:
             task = asyncio.create_task(asyncio.to_thread(run))
