@@ -1,4 +1,4 @@
-// Cases: one list of every case (docs/FRONTEND_NOTE_CASES.md: an escalation and its ticket are one case), the
+// Cases: an escalation and its ticket are one case
 // Open / Mine / Unassigned / Resolved chips, the table and the side panel.
 // URL: /console/cases[/<case_type>/<case_id>][?filter=mine&page=2]. Buttons follow docs/CONSOLE_API.md "Roles"; the
 // backend enforces the same rules anyway.

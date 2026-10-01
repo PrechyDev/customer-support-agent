@@ -99,7 +99,7 @@ export function pct(value) {
   return value === null || value === undefined ? "–" : `${value}%`;
 }
 
-// How a case will be followed up (docs/FRONTEND_NOTE_CASES.md): an escalation is a person to contact (by call or
+// How a case will be followed up (docs/CONSOLE_API.md, Cases): an escalation is a person to contact (by call or
 // email), a ticket on its own is logged for the team to fix. The callback window is already in the caller's time.
 export function caseFollowUp(row) {
   if (row.case_type === "escalation" && row.callback?.spoken) {
