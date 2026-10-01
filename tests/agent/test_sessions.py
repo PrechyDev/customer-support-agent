@@ -206,3 +206,23 @@ def test_end_call_signal_makes_the_backend_say_the_goodbye_and_hang_up():
     spoken, last = asyncio.run(ask(m, "a", "no, that's all"))
     assert (spoken, last.ends_call) == (fallbacks.GOODBYE, True)
     assert m.active_count == 0  # engine closed with the call
+
+
+def test_a_form_that_arrives_after_the_session_is_built_is_told_to_the_agent_once():
+    factory = Factory()
+    m = manager(factory)
+    form = {"name": "Ada", "email": "ada@example.com"}
+
+    async def scenario():
+        await m.prewarm("a")  # Vapi's call-started event: no form yet
+        await ask_with(m, "a", "hi", form)  # the first request carries the form
+        await ask_with(m, "a", "again", form)
+
+    asyncio.run(scenario())
+    first, second = factory.created["a"].queries
+    assert first.startswith("[System note: the caller filled in the pre-call form: name, email.")
+    assert first.endswith("\nhi") and second == "again"  # told once, then never again
+
+
+async def ask_with(m, call_id, message, caller):
+    return [e async for e in m.ask(call_id, message, caller)]

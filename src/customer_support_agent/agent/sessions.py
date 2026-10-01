@@ -23,6 +23,21 @@ class _Entry:
     last_used: float = 0.0
     max_turn_hits: int = 0
     technical_failures_in_row: int = 0
+    form_fields: frozenset[str] = frozenset()  # pre-call form fields the agent has been told about
+
+
+FORM_FIELDS = ("name", "email", "company", "phone")
+
+
+def _filled(caller: Caller | None) -> frozenset[str]:
+    return frozenset(key for key in FORM_FIELDS if caller and caller.get(key))
+
+
+def _form_note(fields: frozenset[str]) -> str:
+    """Told to the agent when the form arrives after its session was built (prewarm events don't carry it)."""
+    names = ", ".join(key for key in FORM_FIELDS if key in fields)
+    return (f"[System note: the caller filled in the pre-call form: {names}. The tools use it automatically, "
+            f"so don't ask for these.]")
 
 
 class SessionManager:
@@ -77,6 +92,9 @@ class SessionManager:
             if entry.session is None:
                 try:
                     entry.session = await self._factory(conversation_id, caller)
+                    entry.form_fields = _filled(caller)
+                    logger.info("Agent session built with form fields %s (conversation=%s)",
+                                sorted(entry.form_fields) or "none", conversation_id)
                 except Exception as exc:
                     # Retrying within the call can't fix an engine that won't start: end the call clearly.
                     logger.exception("Could not start agent session (conversation=%s)", conversation_id)
@@ -86,6 +104,11 @@ class SessionManager:
                                      fallback=fallbacks.TECHNICAL_GOODBYE, ends_call=True)
                     return
 
+            arrived = _filled(caller) - entry.form_fields
+            if arrived:  # the form came after the session was built: tell the agent once
+                message = f"{_form_note(_filled(caller))}\n{message}"
+                entry.form_fields |= arrived
+                logger.info("Told the agent about form fields %s (conversation=%s)", sorted(arrived), conversation_id)
             entry.last_used = self._clock()
             spoke = False
             ends_call = False
@@ -151,7 +174,9 @@ class SessionManager:
         async with entry.lock:  # the first message waits here until the engine is ready
             try:
                 entry.session = await self._factory(conversation_id, caller)
-                logger.info("Prewarmed agent session (conversation=%s)", conversation_id)
+                entry.form_fields = _filled(caller)
+                logger.info("Prewarmed agent session with form fields %s (conversation=%s)",
+                            sorted(entry.form_fields) or "none", conversation_id)
             except Exception:
                 logger.exception("Prewarm failed; the first message will retry (conversation=%s)", conversation_id)
                 self._entries.pop(conversation_id, None)

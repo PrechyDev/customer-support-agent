@@ -94,7 +94,7 @@ Designed after the first voice tests, where early guesses by Vapi caused double 
 
 **1. Listening (Vapi assistant settings)**
 - End-of-turn detection: `startSpeakingPlan.smartEndpointingPlan.provider = "livekit"` (Vapi recommends it for English: it reads the words, not just pauses).
-- `startSpeakingPlan.waitSeconds = 0.6` (default 0.4): a slightly longer beat before replying means fewer false starts.
+- `startSpeakingPlan.waitSeconds = 0.6` (default 0.4): a slightly longer beat before replying means fewer false starts. **Changed 01-10-2026 to 0.8:** the call records showed Vapi still guessing early on natural pauses ("um", "okay… hmm"): 4 of 9 requests in one call, and early guesses in every test call. Each one makes the backend start, cancel and drain a reply, and lets Vapi talk over the caller. Cost: about 0.2 s more before every reply. **Reverted to 0.6 the same day:** the next call still had 6 early guesses in 13 requests, and Vapi's per-turn metrics showed endpointing at about 0.3 s regardless (LiveKit decides the end of turn, and Vapi sends the request as soon as it first suspects the caller stopped). `waitSeconds` only delays speech. Instead, **filler-only messages** ("um", "uh, I", up to 4 thinking-sound words) are not sent to the agent and get no reply; "okay", "yes", "no" still do. **Form arriving late:** if the agent session was built before the form arrived (the prewarm event doesn't carry it), the next message carries one note: "[System note: the caller filled in the pre-call form: name, email…]". Each session logs which form fields it saw; Vapi's `endedReason` is logged on every end event.
 - `stopSpeakingPlan.numWords = 2`: noise and "uh" don't cut Bex off. Real interruptions ("no", "wait", "actually") still work instantly (Vapi's built-in list).
 
 **2. Backend turn rules**
@@ -171,17 +171,17 @@ Designed after the first voice tests, where early guesses by Vapi caused double 
 - **No verification needed.** Anyone with a reference hears a **neutral status only**. This applies to verified callers too, even for their own transaction.
 - The tool returns **only the status** to the model. Amount, currency, customer_id and destination never reach it. This is a deliberate reduction from the spec's output (§9).
 - **Dates use the real current date.** There is no test clock.
-- **Decide from the status first, then the date:**
+- **Decide from the status first, then the date.** Lines name the thing ("that payment" for a transaction, "that payout"), never a bare "it" (changed 01-10):
 
 | Stored status | Date check? | Agent says | Then |
 |---|---|---|---|
-| processing | yes: if the date has passed → treat as **delayed** | "It's currently processing." / delayed wording | escalate if delayed |
-| scheduled (payouts only, not in seed data) | yes: same as processing | "It's scheduled." / delayed wording | escalate if delayed |
-| delayed | no | "It's taking longer than usual." | escalate |
-| completed | no | "It shows as completed." | — |
-| failed (transaction) | ignore any date | "It didn't go through." | ticket (§6) |
-| failed (payout) | ignore any date | "It didn't go through." Never states `failure_reason` | escalate |
-| review required | ignore any date | "It's under review." No mention of compliance | escalate |
+| processing | yes: if the date has passed → treat as **delayed** | "That payment / payout is still being processed." / delayed wording | escalate if delayed |
+| scheduled (payouts only, not in seed data) | yes: same as processing | "That payout is scheduled." / delayed wording | escalate if delayed |
+| delayed | no | "I'm sorry, that payment (or payout) is taking a bit longer than usual." | escalate |
+| completed | no | "Good news, that payment shows as completed." | — |
+| failed (transaction) | ignore any date | "I'm sorry, it looks like that payment didn't go through." | ticket (§6) |
+| failed (payout) | ignore any date | "I'm sorry, it looks like that payout didn't go through." Never states `failure_reason` | escalate |
+| review required | ignore any date | "That payment (or payout) is currently being reviewed." No mention of compliance | escalate |
 | unknown status | — | nothing guessed | escalate |
 | not found | — | "I couldn't find that reference." | ask them to repeat once, then offer a ticket |
 

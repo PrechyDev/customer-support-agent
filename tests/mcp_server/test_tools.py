@@ -32,7 +32,7 @@ def test_lookups_return_only_status_and_next_step():
     repo = FakeRepository()
     txn = accounts.lookup_transaction(repo, "c1", "T X N nine zero zero one", TODAY)
     assert txn == {"found": True, "reference": "TXN-9001", "status": "delayed",
-                   "say": "I'm sorry, it's taking a bit longer than usual.", "next_step": "escalate"}  # processing, ETA passed
+                   "say": "I'm sorry, that payment is taking a bit longer than usual.", "next_step": "escalate"}  # processing, ETA passed
     payout = accounts.lookup_payout(repo, "c1", None, "TXN-9003", TODAY)  # by its transaction reference
     assert (payout["reference"], payout["status"], payout["next_step"]) == ("PAY-7002", "under review", "escalate")
     assert "failure_reason" not in payout and "amount" not in txn

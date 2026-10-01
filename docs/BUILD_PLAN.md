@@ -19,7 +19,7 @@ security rules, tests, build order). Design source: `../design_handoff_relaypay_
 2. [ ] User test call through the page: form data reaches the call record (`relaypay-call`)
 3. [ ] Console: sign-in, Dashboard, Cases (resolve with note), Conversations, Customers, new-item ping (§3, §5.2–§5.3)
 4. [ ] Deploy (Phase 7), then the 9 test scenarios by voice (combined into ~3 calls), evidence, Loom, reflections, one-pager
-5. [ ] Open from earlier: model decision note, `docs/vapi-assistant.json`, Vapi `waitSeconds` 0.8 (optional)
+5. [ ] Open from earlier: model decision note, `docs/vapi-assistant.json`; Vapi `waitSeconds`: 0.8 tried on 01-10, reverted to 0.6 (no effect on early guesses; fillers handled in the backend instead)
 
 ## Phase 0: Planning docs
 - [x] Business rules agreed and logged in the decisions log
@@ -47,7 +47,7 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [x] First voice calls (Haiku 4.5): calls work end to end. Found: invented details, unusable questions (loops), answering before searching, spoken reasoning, no goodbye, pointless filler, dropped words
 - [x] Fixes: grounding prompt rewrite, FAQ question match in search, goodbye phrase, backend filler after 2 s, debug log of the exact text sent to Vapi
 - [x] **Conversation flow (SPECS §2b):** drain interrupted turns · complete messages (drop narration) · empty reply from spoken text · waiting ladder 2 s / 8 s / 15 s · warm closing line · realistic shared-stream fake engine in tests
-- [ ] Vapi: LiveKit endpointing, `waitSeconds` 0.6, `stopSpeakingPlan.numWords` 2
+- [x] Vapi: LiveKit endpointing, `waitSeconds` 0.6 (0.8 tried and reverted 01-10), `stopSpeakingPlan.numWords` 2
 - [x] Latency fixes: sentence streaming after a tool, call-started prewarm + end-of-call close via `/vapi/events`. Filler removed after testing; one reassurance at 10 s. Prompt: one clear next step per reply
 - [ ] Vapi: `server.url` = `/vapi/events` with `X-RelayPay-Secret`, `serverMessages` = status-update + end-of-call-report
 - [ ] Re-run the two failing conversations with LOG_LEVEL=DEBUG; compare "Sent to Vapi" with Vapi's transcript word by word

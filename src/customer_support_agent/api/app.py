@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from customer_support_agent.agent import fallbacks
 from customer_support_agent.agent.grounding import assess
-from customer_support_agent.agent.phrase_check import flag_caller, flag_phrases
+from customer_support_agent.agent.phrase_check import flag_caller, flag_phrases, is_filler
 from customer_support_agent.agent.session import AgentEvent, TextDelta, TurnResult
 from customer_support_agent.api.auth import check_vapi_secret, describe_auth_header
 from customer_support_agent.api.caller import caller_from_vapi
@@ -151,6 +151,15 @@ def create_app(manager: Manager, vapi_secret: str,
             recorder.turn(call_id, caller, parsed.message, sent, checked.answer_type, note,
                           first_text_ms, _ms_since(started))
 
+        if is_filler(parsed.message):
+            # "Um, I.": Vapi sent a pause as a turn. Answering it ("Take your time") talks over the caller, so
+            # say nothing and keep listening. Not a turn: nothing recorded, nothing sent to Claude.
+            logger.info("Caller only paused (%d words of filler); not sent to the agent (conversation=%s)",
+                        len(parsed.message.split()), call_id)
+            if parsed.stream:
+                return StreamingResponse(iter([sse_chunk(None, chunk_id=chunk_id, model=MODEL_NAME, finish=True),
+                                               sse_done()]), media_type="text/event-stream")
+            return JSONResponse(completion("", chunk_id=chunk_id, model=MODEL_NAME))
         if len(parsed.message) > fallbacks.MAX_MESSAGE_CHARS:  # checked on the caller's own words, before Claude
             logger.warning("Caller message too long (%d chars); not sent to the agent (conversation=%s)",
                            len(parsed.message), call_id)
@@ -187,6 +196,8 @@ def create_app(manager: Manager, vapi_secret: str,
             caller = caller_for(str(call_id), message)
             run_in_background(manager.prewarm(str(call_id), caller))  # answer Vapi at once; the engine starts meanwhile
         elif call_id and (kind == "end-of-call-report" or (kind == "status-update" and message.get("status") == "ended")):
+            logger.info("Call ended (conversation=%s event=%s reason=%s)", call_id, kind,
+                        message.get("endedReason") or (message.get("call") or {}).get("endedReason") or "not given")
             last_sent.pop(str(call_id), None)
             callers.pop(str(call_id), None)
             flagged.pop(str(call_id), None)

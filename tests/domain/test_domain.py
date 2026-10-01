@@ -26,6 +26,11 @@ def test_spoken_phone_numbers_need_a_country_code():
     assert mask_phone("+2348031234567") == "+234*******567"
 
 
+def test_status_lines_say_which_payment_or_payout():
+    assert caller_status("transaction", "failed", None, TODAY).line == "I'm sorry, it looks like that payment didn't go through."
+    assert caller_status("payout", "review required", None, TODAY).line == "That payout is currently being reviewed."
+
+
 def test_spoken_input_is_normalised():
     assert normalise_email("Amara at Lagos Ledger dot example") == "amara@lagosledger.example"
     assert normalise_email("not an email") is None

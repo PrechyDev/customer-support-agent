@@ -47,7 +47,7 @@ For the next Claude Code session. Read this, then `docs/BUILD_PLAN.md` ("▶ Nex
 - Custom LLM URL = the ngrok base URL. **Our secret goes in `model.headers["X-RelayPay-Secret"]`**, because the org-wide Custom LLM key always fills `Authorization` (and is visible to the org).
 - `server.url` = `…/vapi/events`, same header; `serverMessages` = status-update, end-of-call-report.
 - `endCallPhrases` = `goodbye` (one word; Vapi splits longer phrases). The model never says it: it writes `<end_call/>` and the backend says the goodbye.
-- LiveKit endpointing, `waitSeconds` 0.6, `stopSpeakingPlan.numWords` 2, voice `chunkPlan.minCharacters` 30 (the default; 10 split phrases).
+- LiveKit endpointing, `waitSeconds` 0.6 (0.8 was tried on 01-10 and reverted: it didn't reduce early guesses), `stopSpeakingPlan.numWords` 2, voice `chunkPlan.minCharacters` 30 (the default; 10 split phrases).
 - All changes are made with PowerShell PATCH commands the user runs; Claude never handles the private key.
 
 **Phase 3 settings to apply (user runs this, from the repo root):** sends the pre-call form to `/chat/completions` (`metadataSendMode: "variable"`) and turns on Vapi's end-of-call summary. It reads the current model first and sends it back whole, so the URL and `X-RelayPay-Secret` header are kept.

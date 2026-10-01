@@ -34,6 +34,19 @@ _CALLER_RULES = (
 )
 
 
+# Sounds people make while thinking. A message made only of these isn't a turn: Vapi sent it because the caller
+# paused ("Um, I."). "okay", "yes", "no" and "thanks" are real replies and are NOT in this list.
+_FILLERS = frozenset({"um", "umm", "uh", "uhh", "er", "erm", "hmm", "hm", "mm", "mmm", "ah", "eh", "i", "so",
+                      "well", "like", "and", "but"})
+MAX_FILLER_WORDS = 4
+
+
+def is_filler(text: str) -> bool:
+    """True when the caller only made thinking sounds ("Um, I.", "uh, so"): nothing to answer yet."""
+    words = re.findall(r"[a-z']+", (text or "").lower())
+    return 0 < len(words) <= MAX_FILLER_WORDS and all(word in _FILLERS for word in words)
+
+
 def flag_caller(text: str) -> list[str]:
     """Event types the caller's words suggest (injection_attempt, sensitive_request); empty if none."""
     return [event for event, pattern in _CALLER_RULES if pattern.search(text or "")]
