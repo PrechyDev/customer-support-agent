@@ -1,4 +1,4 @@
-// Voice page state machine (FRONTEND_PLAN §3, §4). Two screens:
+// Voice page state machine. Two screens:
 //   details (idle)  ->  call: connecting (ringing) -> live -> ended, or error
 // One state object; render() draws the page from it.
 

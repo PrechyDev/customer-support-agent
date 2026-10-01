@@ -1,6 +1,6 @@
 # Design
 
-> **01-10-2026: the handoff is the source of truth: `../../design_handoff_relaypay_v1/README.md`** (Claude Design handoff, high fidelity) and the scope in `docs/FRONTEND_PLAN.md`. §2 and §4 below now match what was built.
+> **01-10-2026: the handoff is the source of truth: `../../design_handoff_relaypay_v1/README.md`** (Claude Design handoff, high fidelity) and the scope in `../build-notes/FRONTEND_PLAN.md` (archived). §2 and §4 below now match what was built.
 
 The visual and interaction design for the two screens: the **voice page** (for customers) and the **support console** (for RelayPay staff).
 
@@ -52,7 +52,7 @@ Focus: a 2px teal outline. Buttons, active states and highlights use colour **wi
 ## 4. Voice page (customers): as built (01-10-2026)
 
 Served at `/` by FastAPI. Plain HTML, CSS and JS modules, no build step (`web/static/voice/`). Layout, copy and states
-follow the handoff's "Screen 1", with the copy changes in FRONTEND_PLAN §4.6.
+follow the handoff's "Screen 1".
 
 - **Two screens** (changed 01-10 after the user's first look):
   1. **Details:** header, the form in one column (Name and Email required, Company and Phone optional; phone needs a
@@ -71,7 +71,7 @@ follow the handoff's "Screen 1", with the copy changes in FRONTEND_PLAN §4.6.
 - **After the call:** an outcome box from our own records (Callback requested / Passed to a specialist / Ticket created /
   Thanks for calling; never "booked" or a timeline), "Did this help?" Yes/No (saved once), "Start a new conversation"
   (the form keeps its values).
-- **Out:** text chat, email summary, tool-name hints, the help-centre tile and support email (FRONTEND_PLAN §3).
+- **Out:** text chat, email summary, tool-name hints, the help-centre tile and support email.
 - No keys in the page except Vapi's **public** key, fetched from `/voice/config`.
 
 ---
@@ -90,7 +90,7 @@ follows the handoff's "Screen 2"; the API and the role rules are in `docs/CONSOL
 - **Dashboard:** five KPIs, "Needs attention" (callback today, then unassigned, then oldest; support see only
   their own and unassigned), five recent conversations.
 - **Cases:** one list of every case (an escalation and its ticket are one case; changed 01-10, see
-  `docs/FRONTEND_NOTE_CASES.md`), with Open / Mine / Unassigned / Resolved chips. Each row shows priority and how
+  `docs/CONSOLE_API.md`, Cases), with Open / Mine / Unassigned / Resolved chips. Each row shows priority and how
   it will be followed up: "Callback" + the window in the caller's local time, "Follow up by email", or "Logged"
   (a ticket on its own: the team fixes it, no customer contact). Then owner, status, and Take / Resolve / Reopen.
   A row opens the side panel (560 px, expandable; its own URL): handover summary with a link to the conversation,

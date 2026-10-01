@@ -1,4 +1,4 @@
-"""The voice page's endpoints (FRONTEND_PLAN §5.1, §8)."""
+"""The voice page's endpoints."""
 
 from datetime import UTC, datetime, timedelta
 

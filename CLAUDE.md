@@ -7,7 +7,7 @@ A voice customer support agent for RelayPay, a B2B cross-border payments company
 ## Start of every session
 
 Before doing anything else:
-1. Read `docs/HANDOVER.md` (latest state and how to run a test call), then `docs/BUILD_PLAN.md`: start from "▶ Next session".
+1. Read `../build-notes/HANDOVER.md` (latest state, kept outside the repo), then `README.md` and `docs/BUILD_PLAN.md`: start from "▶ Next session".
 2. Read `docs/SPECS.md`, the business rules. Don't contradict them without asking.
 3. Look through the code under `src/` and `tests/` to see what actually exists. The plan can be out of date; the code is the truth.
 4. Tell me in a few lines where we are and what's next, then wait.

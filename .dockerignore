@@ -1,0 +1,24 @@
+# Secrets: never in the image (Cloud Run gets them from Secret Manager)
+.env
+.env.*
+!.env.example
+
+# Local environment and caches (Windows packages don't run in the Linux image)
+.venv/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+
+# Call logs hold transcripts and contact details
+logs/
+
+# Not needed at runtime
+.git/
+tests/
+docs/
+migrations/
+CLAUDE.md
+README.md
+Dockerfile
+.dockerignore
+.gcloudignore

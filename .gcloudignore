@@ -1,0 +1,21 @@
+# What `gcloud run deploy --source .` uploads to Cloud Build. Same rules as .dockerignore; the Dockerfile
+# itself must be uploaded so Cloud Build can use it.
+.gcloudignore
+.git/
+.gitignore
+
+.env
+.env.*
+!.env.example
+
+.venv/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+
+logs/
+tests/
+docs/
+migrations/
+CLAUDE.md
+README.md

@@ -5,21 +5,22 @@ Tick items as they're done (`[x]`). When something new comes up, add it to the r
 **Deadline: Friday 2 Oct 2026, 12:00pm.** Target 14/15.
 **Order:** backend → voice interface → support console → evaluations and submission.
 
-Last updated: 01-10-2026
+Last updated: 02-10-2026
 
 ---
 
-## ▶ Next session (start here): 01-10-2026 (frontend)
+## ▶ Next session (start here): 02-10-2026 (deploy and submit)
 
-State: **backend done and voice-tested** (Phase 3 + fixes from 4 voice calls, commits `d63989b`, `322e9b7`). 112 tests pass.
-**The frontend is handed to a new session: follow `docs/FRONTEND_PLAN.md`** (scope in/out, endpoints, migration 005,
-security rules, tests, build order). Design source: `../design_handoff_relaypay_v1/` (README is the spec).
+State: **everything is built, tested and committed**: voice agent, voice page, support console, production
+hardening, evaluations (13/13 on the final code), 150 tests. Migrations 001–006 applied to public and test.
+How to run and deploy it: `README.md`. Working notes from the build: `../build-notes/` (outside the repo).
 
-1. [x] Voice page + pre-call form + live captions + greeting by name + outcome box + rating (FRONTEND_PLAN §3–§5.1). Built 01-10; migration 005 to apply
-2. [ ] User test call through the page: form data reaches the call record (`relaypay-call`)
-3. [ ] Console: sign-in, Dashboard, Cases (resolve with note), Conversations, Customers, new-item ping (§3, §5.2–§5.3)
-4. [ ] Deploy (Phase 7), then the 9 test scenarios by voice (combined into ~3 calls), evidence, Loom, reflections, one-pager
-5. [ ] Open from earlier: model decision note, `docs/vapi-assistant.json`; Vapi `waitSeconds`: 0.8 tried on 01-10, reverted to 0.6 (no effect on early guesses; fillers handled in the backend instead)
+1. [x] Voice page + pre-call form + live captions + greeting by name + outcome box + rating
+2. [x] User test calls through the page: form data reaches the call record (`relaypay-call`)
+3. [x] Console: per-person accounts, dashboard, one Cases list, conversations, customers, analytics, pagination
+4. [ ] Deploy (Phase 7, README "Deploy to Cloud Run"), Vapi pointed at Cloud Run, superadmin on public
+5. [ ] The 9 test scenarios by voice in production, scored with `relaypay-eval --call`; evidence, Loom, one-pager
+6. [x] Vapi `waitSeconds`: 0.6 → 0.4 (02-10; it adds delay without reducing early requests)
 
 ## Phase 0: Planning docs
 - [x] Business rules agreed and logged in the decisions log
@@ -114,13 +115,13 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [x] `LOG_FORMAT=json` for Cloud Logging
 - [x] Attempt limits (verification, repeated sensitive requests)
 
-## Phase 6: Voice interface (plan: `docs/FRONTEND_PLAN.md`)
+## Phase 6: Voice interface (plan archived in `../build-notes/FRONTEND_PLAN.md`)
 - [x] Voice page served by FastAPI, following the handoff, with the pre-call form (name, email required; company and phone optional) sent as Vapi call metadata `{name, email, company, phone}`
 - [x] Vapi Web SDK (`@vapi-ai/web@2.7.1`, pinned) with the public key only (`GET /voice/config`)
 - [x] States: idle, connecting, listening, agent speaking, "one moment", muted, ended, mic denied, connection error
 - [x] Works on mobile width (checked at 320 and 1440 px, keyboard order checked)
 - [x] Live captions, greeting by first name (`variableValues.name`), outcome box + rating (`/voice/calls/{id}/outcome`, `/rating`), migration 005
-- [ ] User applies migration 005 + `.env` values + Vapi first message (FRONTEND_PLAN §6–§7), then test call #1 through the page
+- [ ] User applies migration 005 + `.env` values + Vapi first message, then test call #1 through the page
 
 ## Phase 7: Deploy (see Deployment guide)
 - [ ] Dockerfile

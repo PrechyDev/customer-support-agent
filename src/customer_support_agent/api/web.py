@@ -1,4 +1,4 @@
-"""The voice page and its small API (FRONTEND_PLAN §4, §5.1).
+"""The voice page and its small API.
 
 The browser only ever talks to these endpoints, never to Supabase, and only Vapi's PUBLIC key reaches it.
 """
@@ -42,7 +42,7 @@ class Rating(BaseModel):
 
 
 def outcome_from_record(row: dict) -> dict:
-    """What the voice page shows after the call (FRONTEND_PLAN §4.5). Never a name, phone or full email."""
+    """What the voice page shows after the call. Never a name, phone or full email."""
     out: dict[str, Any] = {"outcome": "none", "reference": None, "callback": None, "email_masked": None}
     if row.get("escalation_id"):
         if row.get("contact_method") == "call":

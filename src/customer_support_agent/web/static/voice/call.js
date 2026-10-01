@@ -1,4 +1,4 @@
-// The only file that talks to Vapi (FRONTEND_PLAN §4.3). Turns Vapi's events into a few plain callbacks.
+// The only file that talks to Vapi. Turns Vapi's events into a few plain callbacks.
 
 const SDK_URL = "https://cdn.jsdelivr.net/npm/@vapi-ai/web@2.7.1/+esm"; // pinned
 const log = (...args) => console.info("[voice]", ...args);

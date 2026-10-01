@@ -1,4 +1,4 @@
-// After the call: the outcome box from our own records, and the "Did this help?" rating (FRONTEND_PLAN §4.5).
+// After the call: the outcome box from our own records, and the "Did this help?" rating.
 // Never "booked" and never a timeline (SPECS §6).
 
 const RETRY_DELAYS_MS = [0, 1500, 1500, 2000]; // records are written in the background: ~5 s in all

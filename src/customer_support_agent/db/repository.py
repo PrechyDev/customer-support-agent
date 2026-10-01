@@ -179,7 +179,7 @@ class Repository:
         self._run(f"update escalations set {sets}, updated_at = now() where escalation_id = %s",
                   (*values.values(), escalation_id))
 
-    # --- voice page (FRONTEND_PLAN §5.1) ---------------------------------------------------
+    # --- voice page ---------------------------------------------------
     def voice_outcome(self, cid: str) -> dict | None:
         """One round trip: when the call started, its latest escalation and its first ticket. None if no such call."""
         return self._run(

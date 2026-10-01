@@ -1,4 +1,4 @@
-// Live captions (FRONTEND_PLAN §4.4). Text goes in with textContent only: it's the caller's own words.
+// Live captions. Text goes in with textContent only: it's the caller's own words.
 
 const LABELS = { user: "You", assistant: "RelayPay" };
 const NEAR_BOTTOM_PX = 24;

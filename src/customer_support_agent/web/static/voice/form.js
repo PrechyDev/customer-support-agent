@@ -1,4 +1,4 @@
-// The pre-call form (FRONTEND_PLAN §4.2). Browser checks are for the caller's convenience only:
+// The pre-call form. Browser checks are for the caller's convenience only:
 // the backend cleans and validates everything again (api/caller.py).
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
