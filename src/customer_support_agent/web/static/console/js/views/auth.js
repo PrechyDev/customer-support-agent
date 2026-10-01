@@ -1,15 +1,38 @@
 // Sign in, and the invite / password-reset screen (/console/invite/<token>).
 
 import { api, post } from "../api.js";
-import { h } from "../dom.js";
+import { h, icon } from "../dom.js";
 
 const ROLE_PHRASE = { superadmin: "the owner", admin: "an admin", support: "support staff" };
+
+// Show / hide for a password input: a real button after the input (so Tab reaches it next and Enter or Space
+// work it), never a submit button. Switching keeps the value and the cursor.
+function passwordToggle(input) {
+  const button = h("button", { type: "button", class: "password-toggle", "aria-controls": input.id,
+    // a mouse click leaves focus (and the cursor) in the input, so typing carries on
+    onmousedown: (event) => event.preventDefault() });
+
+  function show(visible) {
+    const { selectionStart: start, selectionEnd: end } = input;
+    input.type = visible ? "text" : "password";
+    if (start !== null) input.setSelectionRange(start, end); // keep the cursor where it was
+    button.setAttribute("aria-label", visible ? "Hide password" : "Show password");
+    button.setAttribute("aria-pressed", String(visible));
+    button.replaceChildren(icon(visible ? "eyeOff" : "eye", 18));
+  }
+
+  button.addEventListener("click", () => show(input.type === "password"));
+  show(false);
+  return { element: h("div", { class: "password-wrap" }, input, button), hide: () => show(false) };
+}
 
 function field(id, label, attrs) {
   const input = h("input", { id, name: id, class: "input", style: "height:44px;font-size:14px", ...attrs,
     "aria-describedby": `${id}-error` });
   const error = h("div", { class: "form-error", id: `${id}-error`, hidden: true });
-  return { input, error, element: h("div", { class: "field" }, h("label", { for: id }, label), input, error) };
+  const toggle = attrs.type === "password" ? passwordToggle(input) : null;
+  return { input, error, hide: toggle ? toggle.hide : () => {},
+    element: h("div", { class: "field" }, h("label", { for: id }, label), toggle ? toggle.element : input, error) };
 }
 
 function setError(f, message) {
@@ -35,6 +58,7 @@ export function renderSignIn(root, { onSignedIn }) {
   const form = h("form", { class: "auth-form", novalidate: true, style: "display:flex;flex-direction:column;gap:18px",
     onsubmit: async (event) => {
       event.preventDefault();
+      password.hide(); // after any submit (success, error or a missing field) the password is hidden again
       error.hidden = true;
       if (!email.input.value.trim() || !password.input.value) {
         error.textContent = "Enter your work email and password.";
@@ -89,6 +113,8 @@ export async function renderInvite(root, token, { onSignedIn }) {
 
   const form = h("form", { novalidate: true, style: "display:flex;flex-direction:column;gap:16px", onsubmit: async (event) => {
     event.preventDefault();
+    password.hide(); // after any submit, both passwords are hidden again
+    confirm.hide();
     error.hidden = true;
     for (const f of [name, password, confirm]) setError(f, "");
     const local = {};
