@@ -19,7 +19,7 @@ from customer_support_agent.mcp_server.auth import BearerTokenMiddleware
 from customer_support_agent.mcp_server.retrieval_log import RetrievalLogStore
 from customer_support_agent.mcp_server.tools import accounts, cases, knowledge
 from customer_support_agent.mcp_server.tools.common import run_tool
-from customer_support_agent.domain.normalise import mask_email
+from customer_support_agent.domain.normalise import mask_email, mask_phone, normalise_phone
 
 logger = logging.getLogger(__name__)
 
@@ -78,15 +78,21 @@ def create_mcp_server(kb: KnowledgeBase, log_store: RetrievalLogStore, repo: Any
 
     @server.tool(description=cases.CREATE_ESCALATION)
     async def create_escalation(category: str, reason: str, ctx: Context, user_name: str | None = None,
-                                user_email: str | None = None, callback_place: str | None = None,
+                                user_email: str | None = None, reference: str | None = None,
+                                contact_method: str | None = None, callback_place: str | None = None,
                                 callback_day: str | None = None, callback_time: str | None = None,
-                                preferred_time: str | None = None, ticket_id: str | None = None) -> dict[str, Any]:
+                                callback_phone: str | None = None, preferred_time: str | None = None,
+                                ticket_id: str | None = None, email_confirmed: bool = False,
+                                phone_confirmed: bool = False) -> dict[str, Any]:
         cid = ready(ctx)
-        summary = f"{category} email={mask_email(user_email)} callback={callback_day} {callback_time} {callback_place}"
+        summary = (f"{category} ref={reference} method={contact_method} email={mask_email(user_email)} "
+                   f"phone={mask_phone(normalise_phone(callback_phone))} callback={callback_day} {callback_time} {callback_place}")
         return await run_tool(repo, cid, "create_escalation", "hand to a specialist", summary,
                               lambda: cases.create_escalation(repo, cid, category, reason, now(), user_name, user_email,
-                                                              callback_place, callback_day, callback_time,
-                                                              preferred_time, ticket_id), exclusive=True)
+                                                              reference, contact_method, callback_place, callback_day,
+                                                              callback_time, callback_phone, preferred_time, ticket_id,
+                                                              email_confirmed, phone_confirmed),
+                              exclusive=True)
 
     @server.tool(description=cases.LOG_EVENT)
     async def log_conversation_event(event_type: str, summary: str, ctx: Context,

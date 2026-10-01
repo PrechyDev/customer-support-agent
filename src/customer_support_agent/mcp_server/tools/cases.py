@@ -9,8 +9,14 @@ record or the pre-call form before the model's words.
 from datetime import datetime
 from typing import Any
 
-from customer_support_agent.domain.callbacks import CallbackError, callback_window
-from customer_support_agent.domain.normalise import mask_email, normalise_email, parse_reference
+from customer_support_agent.domain.callbacks import CallbackError, callback_window, calling_code, resolve_timezone
+from customer_support_agent.domain.normalise import (
+    mask_email,
+    normalise_email,
+    normalise_phone,
+    parse_reference,
+    spoken_phone,
+)
 from customer_support_agent.mcp_server.tools.common import (
     MAX_ESCALATIONS, MAX_TICKETS, PRIORITIES, TICKET_CATEGORIES, error,
 )
@@ -24,10 +30,16 @@ CREATE_TICKET = (
 )
 CREATE_ESCALATION = (
     "Hand the caller to a specialist: restrictions, compliance, disputes/refunds/cancellations, frustration, "
-    "next_step=escalate, failed verification, or they want a human. Links a ticket automatically. Contact comes "
-    "from the verified account or the pre-call form; only pass user_name/user_email if neither exists. For a "
-    "callback, pass callback_place (city or time zone), callback_day and callback_time (morning/afternoon/evening/"
-    "'3pm'/'any'); call it again with these to add a time to an existing escalation. Say the follow_up_summary."
+    "next_step=escalate, failed verification, or they want a human. category: compliance, account, dispute, "
+    "payment or other. Pass the transaction or payout reference if there is one. Links a ticket automatically. "
+    "No verification needed. Contact comes from the verified account or the pre-call form; only if neither "
+    "exists, ask for the caller's name and email and pass user_name/user_email (it returns confirm_email: say its "
+    "'say' line, then call again with email_confirmed true). Then ask how they'd like to be contacted. For a call: "
+    "pass contact_method='call', callback_day, callback_time (morning/afternoon/evening/'3pm'/'any'), "
+    "callback_place (city or time zone) and callback_phone (exactly as said; a local number is fine when the place "
+    "is known; not needed if the form has one). It checks the time and returns confirm_phone: say its 'say' line "
+    "once, then call again with phone_confirmed true. Never read numbers or emails back yourself. Say the "
+    "follow_up_summary."
 )
 LOG_EVENT = (
     "Record a judgement call: sensitive_request, injection_attempt, verification_failed, caller_frustrated or "
@@ -71,7 +83,8 @@ def create_support_ticket(repo: Any, cid: str, category: str, priority: str, sum
     if len(tickets) >= MAX_TICKETS:
         return error("limit_reached", "No more tickets on this call. Tell the caller you've logged what you can on "
                                       "this call, and for anything else to use their RelayPay dashboard or call again.")
-    ticket_id, created = repo.create_ticket(cid, customer_id, category, priority, summary.strip()[:500], ref)
+    ticket_id, created = repo.create_ticket(cid, customer_id, category, priority, summary.strip()[:500], ref,
+                                            caller_verified=bool(conversation.get("verified_customer_id")))
     return {"ticket_id": ticket_id, "status": "open", "created": created}
 
 
@@ -85,56 +98,108 @@ def _contact(repo: Any, conversation: dict, user_name: str | None, user_email: s
     return name, email
 
 
-def _callback(place: str | None, day: str | None, when: str | None, now: datetime) -> dict[str, Any]:
-    window = callback_window(place, day or "", when or "", now)
-    raw = " ".join(p for p in (day, when, place) if p)
-    if window is None:
-        return {"call_booked": False, "preferred_time_raw": raw or "any time", "callback_timezone": None,
-                "callback_start_utc": None, "callback_end_utc": None, "_spoken": None}
-    return {"call_booked": True, "preferred_time_raw": raw, "callback_timezone": window.timezone,
-            "callback_start_utc": window.start_utc, "callback_end_utc": window.end_utc, "_spoken": window.spoken}
+_ANY_TIME = ("", "any", "anytime", "any time")
 
 
-def _follow_up(spoken: str | None) -> str:
-    return ("A specialist will follow up with you by email" +
-            (f", and will aim to call you {spoken}." if spoken else "."))
+def _call_request(conversation: dict, place: str | None, day: str | None, when: str | None, phone: str | None,
+                  phone_confirmed: bool, preferred_time: str | None, now: datetime) -> tuple[dict | None, dict | None]:
+    """(callback columns, error). The time and place are checked first (a weekend or an unknown place is
+    caught before anything is confirmed). The place also gives the country code, so a local number
+    ('0814 346 3800') is fine. A spoken number is confirmed once, together with the time."""
+    raw = (preferred_time or " ".join(p for p in (day, when, place) if p) or "any time").strip()[:200]
+    values = {"contact_method": "call", "preferred_time_raw": raw, "call_booked": False,
+              "callback_timezone": None, "callback_start_utc": None, "callback_end_utc": None}
+    window, zone = None, None
+    any_time = (when or "").strip().lower() in _ANY_TIME and not day
+    try:
+        if place:
+            zone = resolve_timezone(place).key
+        if not any_time:
+            if not place:
+                return None, error("invalid_input", "Ask which city or time zone they're in, then call again.")
+            window = callback_window(place, day or "", when or "", now)
+    except CallbackError as exc:
+        return None, error(exc.code, exc.hint)
+    if window is not None:
+        values.update(call_booked=True, callback_timezone=window.timezone, callback_start_utc=window.start_utc,
+                      callback_end_utc=window.end_utc)
+    spoken = window.spoken if window else None
+
+    number = conversation.get("caller_phone")  # typed in the form: no read-back needed
+    if phone:
+        number = normalise_phone(phone, default_code=calling_code(zone))
+        if number is None:
+            return None, error("invalid_input", "Ask for the number with the country code (we don't know which "
+                                                "country it's in), then call again.")
+        if not phone_confirmed:
+            when_said = f", on {spoken}" if spoken else ""
+            return None, {"error": "confirm_phone", "say": f"Just to confirm: {spoken_phone(number)}{when_said}. Is that right?",
+                          "hint": "Read the say line once; if they confirm, call again with phone_confirmed true."}
+    if not number:
+        when_ok = f"The time works ({spoken}). " if spoken else "The time works. "
+        return None, error("needs_phone", when_ok + "Now ask for the best number to reach them.")
+    return {**values, "callback_phone": number, "_spoken": spoken}, None
+
+
+def _spoken_email(email: str) -> str:
+    return email.replace("@", " at ").replace(".", " dot ")
+
+
+def _follow_up(method: str, spoken: str | None) -> str:
+    if method == "call" and spoken:
+        return f"Lovely, a specialist will call you on {spoken}."
+    if method == "call":
+        return "Lovely, a specialist will call you as soon as one is free."
+    return "Lovely, a specialist will email you."
 
 
 def create_escalation(repo: Any, cid: str, category: str, reason: str, now: datetime,
-                      user_name: str | None = None, user_email: str | None = None,
-                      callback_place: str | None = None, callback_day: str | None = None,
-                      callback_time: str | None = None, preferred_time: str | None = None,
-                      ticket_id: str | None = None) -> dict[str, Any]:
+                      user_name: str | None = None, user_email: str | None = None, reference: str | None = None,
+                      contact_method: str | None = None, callback_place: str | None = None,
+                      callback_day: str | None = None, callback_time: str | None = None,
+                      callback_phone: str | None = None, preferred_time: str | None = None,
+                      ticket_id: str | None = None, email_confirmed: bool = False,
+                      phone_confirmed: bool = False) -> dict[str, Any]:
     if category not in TICKET_CATEGORIES:
         return error("invalid_input", f"category must be one of: {', '.join(TICKET_CATEGORIES)}.")
     if not (reason or "").strip():
         return error("invalid_input", "Give a one-sentence reason for the escalation.")
-
-    callback = None
-    if callback_time or callback_day:
-        if not callback_place:
-            return error("invalid_input", "Ask which city or time zone they're in, then call again.")
-        try:
-            callback = _callback(callback_place, callback_day, callback_time, now)
-        except CallbackError as exc:
-            return error(exc.code, exc.hint)
-        if preferred_time:
-            callback["preferred_time_raw"] = preferred_time.strip()[:200]
+    if contact_method not in (None, "email", "call"):
+        return error("invalid_input", "contact_method must be email or call.")
+    ref = parse_reference(reference) if reference else ""
+    if reference and not ref:
+        return error("invalid_input", "That reference isn't clear. Ask them to repeat it once.")
 
     conversation = repo.ensure_conversation(cid) or {}
+    wants_call = contact_method == "call" or bool(callback_day or callback_time or callback_phone)
+    callback = None
+    if wants_call:
+        callback, problem = _call_request(conversation, callback_place, callback_day, callback_time, callback_phone,
+                                          phone_confirmed, preferred_time, now)
+        if problem:
+            return problem
+    method = "call" if wants_call else "email"
+    spoken = callback.pop("_spoken") if callback else None
+
     escalations = repo.escalations(cid)
     existing = next((e for e in escalations if e["category"] == category), None)
-    if existing:  # a repeat, or adding a callback time to it
-        spoken = None
+    if existing:  # a repeat, or adding how they'd like to be contacted
         if callback:
-            spoken = callback.pop("_spoken")
             repo.set_callback(existing["escalation_id"], callback)
-        return {"escalation_id": existing["escalation_id"], "ticket_id": existing["ticket_id"], "status": existing["status"],
-                "created": False, "follow_up_summary": _follow_up(spoken)}
+        elif contact_method == "email" and existing.get("contact_method") == "call":
+            repo.set_callback(existing["escalation_id"], {"contact_method": "email"})
+        current = method if (callback or contact_method) else existing.get("contact_method", "email")
+        return {"escalation_id": existing["escalation_id"], "ticket_id": existing["ticket_id"],
+                "status": existing["status"], "created": False, "follow_up_summary": _follow_up(current, spoken)}
 
     name, email = _contact(repo, conversation, user_name, user_email)
     if not name or not email:
-        return error("invalid_input", "Need the caller's name and a valid email. Ask for what's missing, and read the email back.")
+        return error("needs_contact", "Ask for the caller's name and email, then call again with user_name and "
+                                      "user_email.")
+    email_was_spoken = not (conversation.get("verified_customer_id") or conversation.get("caller_email"))
+    if email_was_spoken and not email_confirmed:  # a misheard email means nobody can follow up: always read it back
+        return {"error": "confirm_email", "say": f"Just to confirm, that's {_spoken_email(email)}. Is that right?",
+                "hint": "Read the email back; if they confirm, call again with email_confirmed true."}
     if len(escalations) >= MAX_ESCALATIONS:
         return error("limit_reached", "No more escalations on this call. Tell the caller the specialists already "
                                       "following up have this call's details, and for anything new to use their "
@@ -143,20 +208,25 @@ def create_escalation(repo: Any, cid: str, category: str, reason: str, now: date
     verified = bool(conversation.get("verified_customer_id"))
     customer_id = conversation.get("verified_customer_id")
     linked = next((t for t in repo.tickets(cid) if t["ticket_id"] == ticket_id), None) if ticket_id else None
-    if linked is None:  # every escalation has a ticket: link this call's own, or create one
-        ticket, _ = repo.create_ticket(cid, customer_id, category, "high", reason.strip()[:500], "")
+    if linked is None:  # every escalation has a ticket: link this call's own, or create one (same key = same ticket)
+        ticket, _ = repo.create_ticket(cid, customer_id or _ticket_customer(repo, conversation, ref), category, "high",
+                                       reason.strip()[:500], ref, caller_verified=verified)
     else:
         ticket = linked["ticket_id"]
 
-    spoken = callback.pop("_spoken") if callback else None
     values = {"conversation_id": cid, "ticket_id": ticket, "customer_id": customer_id, "user_name": name[:100],
               "user_email": email, "category": category, "reason": reason.strip()[:500], "verified": verified,
-              **(callback or {"call_booked": False, "preferred_time_raw": (preferred_time or "").strip() or None})}
+              **(callback or {"contact_method": "email", "call_booked": False,
+                              "preferred_time_raw": (preferred_time or "").strip()[:200] or None})}
     escalation_id, created = repo.create_escalation(  # the escalation_created event is written with it
         values, f"{category}: {reason.strip()[:200]}",
-        {"ticket_id": ticket, "verified": verified, "contact": mask_email(email)})
-    return {"escalation_id": escalation_id, "ticket_id": ticket, "status": "open", "created": created,
-            "follow_up_summary": _follow_up(spoken)}
+        {"ticket_id": ticket, "verified": verified, "contact": mask_email(email), "method": method})
+    asked_how = method == "email" and contact_method is None  # first step: ask how they'd like to be contacted
+    result = {"escalation_id": escalation_id, "ticket_id": ticket, "status": "open", "created": created,
+              "follow_up_summary": "I've passed this to a specialist." if asked_how else _follow_up(method, spoken)}
+    if asked_how:
+        result["next"] = "Ask whether they'd like a call back or to be reached by email."
+    return result
 
 
 def log_conversation_event(repo: Any, cid: str, event_type: str, summary: str,

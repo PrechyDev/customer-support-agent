@@ -9,6 +9,23 @@ from customer_support_agent.domain.status import caller_status
 TODAY = date(2026, 10, 1)  # a Thursday
 
 
+def test_spoken_phone_numbers_need_a_country_code():
+    from customer_support_agent.domain.normalise import mask_phone, normalise_phone
+
+    assert normalise_phone("plus two three four, eight oh three, one two three, four five six seven") == "+2348031234567"
+    assert normalise_phone("+234 803 123 4567") == normalise_phone("00234 803 123 4567") == "+2348031234567"
+    assert normalise_phone("0803 123 4567") is None  # no country code and no place: ask again
+    assert normalise_phone("081-4 346 3800", default_code="234") == "+2348143463800"  # the place gives the code
+    assert normalise_phone("+234 0814 346 3800") == "+2348143463800"  # local 0 dropped after the code
+    from customer_support_agent.domain.callbacks import calling_code, resolve_timezone
+    from customer_support_agent.domain.normalise import spoken_phone
+    assert spoken_phone("+2348143463800") == "0814 346 3800" and spoken_phone("+233244123456") == "024 412 3456"
+    assert calling_code(resolve_timezone("West Africa Time").key) == "234" and calling_code("Etc/GMT-1") is None
+    assert resolve_timezone("UTC+1").key == "Etc/GMT-1" and resolve_timezone("GMT plus one").key == "Etc/GMT-1"
+    assert normalise_phone("+12") is None and normalise_phone(None) is None
+    assert mask_phone("+2348031234567") == "+234*******567"
+
+
 def test_spoken_input_is_normalised():
     assert normalise_email("Amara at Lagos Ledger dot example") == "amara@lagosledger.example"
     assert normalise_email("not an email") is None

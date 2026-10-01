@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from customer_support_agent.agent import fallbacks
 from customer_support_agent.agent.grounding import assess
-from customer_support_agent.agent.phrase_check import flag_phrases
+from customer_support_agent.agent.phrase_check import flag_caller, flag_phrases
 from customer_support_agent.agent.session import AgentEvent, TextDelta, TurnResult
 from customer_support_agent.api.auth import check_vapi_secret, describe_auth_header
 from customer_support_agent.api.caller import caller_from_vapi
@@ -78,6 +78,7 @@ def create_app(manager: Manager, vapi_secret: str,
     app = FastAPI(title="RelayPay support backend", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     auth_format_logged = False
     last_sent: dict[str, str] = {}  # call ID -> what we sent last turn (for "what the caller actually heard")
+    flagged: dict[str, set[str]] = {}  # call ID -> event types already logged from the caller's words
     callers: dict[str, dict | None] = {}  # call ID -> pre-call form, from the first request or event that has it
 
     def caller_for(call_id: str, body: Any) -> dict | None:
@@ -126,6 +127,10 @@ def create_app(manager: Manager, vapi_secret: str,
             message = f"{note}\n{message}"
 
         caller = caller_for(call_id, body)
+        for event_type in flag_caller(parsed.message):  # on record even if the agent doesn't log it
+            if event_type not in flagged.setdefault(call_id, set()):
+                flagged[call_id].add(event_type)
+                recorder.event(call_id, event_type, f"Caller said: {parsed.message[:150]}")
 
         def on_done(result: TurnResult | None, sent: str, first_text_ms: float | None) -> None:
             last_sent[call_id] = sent
@@ -136,6 +141,10 @@ def create_app(manager: Manager, vapi_secret: str,
                 note = f"{note} PHRASE FLAG: {', '.join(flags)}."
                 logger.warning("Phrase check flagged the reply (conversation=%s): %s", call_id, ", ".join(flags))
             _log_turn(call_id, started, first_text_ms, result, sent, checked.answer_type, checked.grounded)
+            if result is None and not sent:
+                # Vapi guessed the caller had finished, then cancelled and resent the full sentence:
+                # nothing was said, so it isn't a turn (the resent request is recorded instead).
+                return
             recorder.turn(call_id, caller, parsed.message, sent, checked.answer_type, note,
                           first_text_ms, _ms_since(started))
 
@@ -177,6 +186,7 @@ def create_app(manager: Manager, vapi_secret: str,
         elif call_id and (kind == "end-of-call-report" or (kind == "status-update" and message.get("status") == "ended")):
             last_sent.pop(str(call_id), None)
             callers.pop(str(call_id), None)
+            flagged.pop(str(call_id), None)
             analysis = message.get("analysis") if isinstance(message.get("analysis"), dict) else {}
             summary = analysis.get("summary") if isinstance(analysis.get("summary"), str) else None
             recorder.ended(str(call_id), summary)  # Vapi's end-of-call summary (analysisPlan.summaryPlan)

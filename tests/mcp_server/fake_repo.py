@@ -45,9 +45,10 @@ class FakeRepository:
         conv = self.conversations.setdefault(cid, {"conversation_id": cid, "verification_attempts": 0,
                                                     "verified_customer_id": None, "caller_name": None,
                                                     "caller_email": None, "caller_company": None, "model": None,
-                                                    "last_verification_try": None})
+                                                    "last_verification_try": None, "caller_phone": None,
+                                                    "lookup_misses": 0})
         conv["model"] = model or conv["model"]
-        for key in ("name", "email", "company"):
+        for key in ("name", "email", "company", "phone"):
             if caller and caller.get(key):
                 conv[f"caller_{key}"] = caller[key]
         return dict(conv)
@@ -82,6 +83,18 @@ class FakeRepository:
     def payout_for_transaction(self, ref):
         return next((p for p in PAYOUTS.values() if p["transaction_id"] == ref), None)
 
+    def lookup_reference(self, cid, kind, value):
+        self._check()
+        conv = self.conversations.get(cid, {})
+        record = {"transaction": self.transaction, "payout": self.payout,
+                  "payout_by_transaction": self.payout_for_transaction}[kind](value)
+        return conv.get("lookup_misses", 0), conv.get("verified_customer_id"), record
+
+    def record_lookup_miss(self, cid):
+        conv = self.conversations.setdefault(cid, {"lookup_misses": 0})
+        conv["lookup_misses"] = conv.get("lookup_misses", 0) + 1
+        return conv["lookup_misses"]
+
     def ticket(self, cid, category, reference):
         return next((t for t in self.ticket_rows
                      if (t["conversation_id"], t["category"], t["reference"]) == (cid, category, reference)), None)
@@ -89,13 +102,13 @@ class FakeRepository:
     def tickets(self, cid):
         return [t for t in self.ticket_rows if t["conversation_id"] == cid]
 
-    def create_ticket(self, cid, customer_id, category, priority, summary, reference):
+    def create_ticket(self, cid, customer_id, category, priority, summary, reference, caller_verified=False):
         existing = self.ticket(cid, category, reference)
         if existing:
             return existing["ticket_id"], False
         ticket = {"ticket_id": f"T-{next(self._ids)}", "conversation_id": cid, "customer_id": customer_id,
                   "category": category, "priority": priority, "summary": summary, "reference": reference,
-                  "status": "open"}
+                  "status": "open", "caller_verified": caller_verified}
         self.ticket_rows.append(ticket)
         return ticket["ticket_id"], True
 

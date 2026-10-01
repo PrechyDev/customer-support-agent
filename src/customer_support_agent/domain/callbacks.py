@@ -24,7 +24,35 @@ _PLACES = {
     "united kingdom": "Europe/London", "london": "Europe/London", "bst": "Europe/London", "cet": "Europe/Paris",
     "utc": "UTC", "est": "America/New_York", "edt": "America/New_York", "cst": "America/Chicago",
     "pst": "America/Los_Angeles", "usa": "America/New_York", "canada": "America/Toronto",
+    # Spoken time zone names ("West African Time" -> "west african" after dropping "time")
+    "west africa": "Africa/Lagos", "west african": "Africa/Lagos", "east africa": "Africa/Nairobi",
+    "east african": "Africa/Nairobi", "central africa": "Africa/Maputo", "central african": "Africa/Maputo",
+    "south african": "Africa/Johannesburg", "greenwich mean": "UTC", "british": "Europe/London",
+    "british summer": "Europe/London", "central european": "Europe/Paris", "eastern": "America/New_York",
+    "central": "America/Chicago", "pacific": "America/Los_Angeles",
 }
+_NUMBER_WORDS = {w: str(i) for i, w in enumerate(("zero one two three four five six seven eight nine ten "
+                                                   "eleven twelve").split())}
+_SUFFIX = re.compile(r"\s+(?:standard\s+)?(?:summer\s+)?time(?:\s+zone)?$|\s+zone$")
+_OFFSET = re.compile(r"^(?:utc|gmt)\s*(plus|minus|\+|-)\s*(\d{1,2})$")
+
+
+# Calling codes for the zones above, so a local number ("0814 346 3800") needs no country code.
+_CALLING_CODES = {
+    "Africa/Lagos": "234", "Africa/Accra": "233", "Africa/Nairobi": "254", "Africa/Kigali": "250",
+    "Africa/Johannesburg": "27", "Africa/Maputo": "258", "Africa/Kampala": "256", "Africa/Dar_es_Salaam": "255",
+    "Europe/London": "44", "Europe/Paris": "33", "Europe/Berlin": "49", "Europe/Amsterdam": "31",
+}
+
+
+def calling_code(zone_key: str | None) -> str | None:
+    """'Africa/Lagos' -> '234'. None when the zone doesn't tell us the country (e.g. 'UTC+1')."""
+    if not zone_key:
+        return None
+    if zone_key.startswith("America/") and zone_key in ("America/New_York", "America/Chicago", "America/Denver",
+                                                        "America/Los_Angeles", "America/Toronto"):
+        return "1"
+    return _CALLING_CODES.get(zone_key)
 
 
 class CallbackError(ValueError):
@@ -55,9 +83,19 @@ def resolve_timezone(place: str | None) -> ZoneInfo:
             return ZoneInfo(place.strip() if "/" in key else "UTC")
     except (ZoneInfoNotFoundError, ValueError):
         pass
+    key = _SUFFIX.sub("", key).strip()
+    key = " ".join(_NUMBER_WORDS.get(w, w) for w in key.split())  # "gmt plus one" -> "gmt plus 1"
+    offset = _OFFSET.match(key)
+    if offset:  # "UTC+1", "GMT plus one": a fixed offset (Etc zones have the sign reversed)
+        hours = int(offset.group(2))
+        if hours > 14:
+            raise CallbackError("unknown_timezone", "Ask for a nearby city or their time zone.")
+        sign = "-" if offset.group(1) in ("plus", "+") else "+"
+        return ZoneInfo("UTC" if hours == 0 else f"Etc/GMT{sign}{hours}")
     name = _PLACES.get(key) or _zones_by_city().get(key)
     if name is None:
-        raise CallbackError("unknown_timezone", f"'{place}' isn't a city or time zone I recognise. Ask for their time zone, or a major city nearby.")
+        raise CallbackError("unknown_timezone", f"'{place}' isn't a place or time zone I recognise. Ask for a nearby "
+                                                f"city or their time zone (either is fine, e.g. a UTC offset).")
     return ZoneInfo(name)
 
 
@@ -107,7 +145,12 @@ def support_hours_spoken(zone: ZoneInfo, on: date) -> str:
 
 
 def _city(zone: ZoneInfo) -> str:
-    return "UTC" if zone.key == "UTC" else zone.key.rsplit("/", 1)[-1].replace("_", " ")
+    if zone.key == "UTC":
+        return "UTC"
+    if zone.key.startswith("Etc/GMT"):  # the caller gave an offset: say it back the way they said it
+        hours = zone.key[len("Etc/GMT"):]
+        return f"UTC{'+' if hours.startswith('-') else '-'}{hours.lstrip('+-')}"
+    return zone.key.rsplit("/", 1)[-1].replace("_", " ")
 
 
 def callback_window(place: str | None, day: str, when: str, now_utc: datetime) -> CallbackWindow | None:

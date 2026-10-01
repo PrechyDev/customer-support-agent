@@ -10,7 +10,8 @@ from dataclasses import dataclass
 
 from customer_support_agent.agent.session import TurnResult
 
-LOOKUP_TOOLS = ("lookup_customer", "lookup_transaction", "lookup_payout")
+# Tools whose result the caller can be told directly (a status, a ticket or escalation confirmation).
+LOOKUP_TOOLS = ("lookup_customer", "lookup_transaction", "lookup_payout", "create_support_ticket", "create_escalation")
 NOT_GROUNDED = "NOT GROUNDED"
 
 
@@ -47,7 +48,7 @@ def assess(result: TurnResult | None, sent_text: str) -> Assessment:
                                         f"turn's search.{extra}", False)
         lookups = [t for t in tools if t in LOOKUP_TOOLS]
         if lookups:
-            return Assessment("answer", f"{unlabelled}From account lookup: {', '.join(lookups)}.{extra}", True)
+            return Assessment("answer", f"{unlabelled}From tool result: {', '.join(lookups)}.{extra}", True)
         return Assessment("answer", f"{unlabelled}{NOT_GROUNDED}: no knowledge base source or lookup this turn.{extra}",
                           False)
     if answer_type == "escalate":

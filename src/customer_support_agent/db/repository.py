@@ -58,15 +58,17 @@ class Repository:
         """Creates the call's row if needed and returns it (one round trip for both)."""
         caller = caller or {}
         return self._run(
-            "insert into conversations (conversation_id, model, caller_name, caller_email, caller_company, caller_identifier) "
-            "values (%s, %s, %s, %s, %s, %s) on conflict (conversation_id) do update set "
+            "insert into conversations (conversation_id, model, caller_name, caller_email, caller_company, caller_phone, "
+            "caller_identifier) values (%s, %s, %s, %s, %s, %s, %s) on conflict (conversation_id) do update set "
             "model = coalesce(excluded.model, conversations.model), "
             "caller_name = coalesce(excluded.caller_name, conversations.caller_name), "
             "caller_email = coalesce(excluded.caller_email, conversations.caller_email), "
             "caller_company = coalesce(excluded.caller_company, conversations.caller_company), "
+            "caller_phone = coalesce(excluded.caller_phone, conversations.caller_phone), "
             "caller_identifier = coalesce(conversations.verified_customer_id, excluded.caller_email, "
             "conversations.caller_identifier, excluded.caller_identifier) returning *",
-            (cid, model, caller.get("name"), caller.get("email"), caller.get("company"), caller.get("email") or "web caller"),
+            (cid, model, caller.get("name"), caller.get("email"), caller.get("company"), caller.get("phone"),
+             caller.get("email") or "web caller"),
             "one",
         )
 
@@ -109,6 +111,25 @@ class Repository:
     def payout_for_transaction(self, transaction_id: str) -> dict | None:
         return self._run("select * from payouts where transaction_id = %s", (transaction_id,), "one")
 
+    _LOOKUPS = {"transaction": ("transactions", "transaction_id"), "payout": ("payouts", "payout_id"),
+                "payout_by_transaction": ("payouts", "transaction_id")}
+
+    def lookup_reference(self, cid: str, kind: str, value: str) -> tuple[int, str | None, dict | None]:
+        """One round trip: (references not found on this call so far, verified customer, the record or None)."""
+        table, column = self._LOOKUPS[kind]  # fixed names, never from input
+        row = self._run(
+            f"select c.lookup_misses as _misses, c.verified_customer_id as _verified, r.* from (select 1) one "
+            f"left join conversations c on c.conversation_id = %s left join {table} r on r.{column} = %s",
+            (cid, value), "one")
+        record = {k: v for k, v in row.items() if not k.startswith("_")}
+        return row["_misses"] or 0, row["_verified"], record if record.get(column) else None
+
+    def record_lookup_miss(self, cid: str) -> int:
+        row = self._run("insert into conversations (conversation_id, lookup_misses) values (%s, 1) "
+                        "on conflict (conversation_id) do update set lookup_misses = conversations.lookup_misses + 1 "
+                        "returning lookup_misses", (cid,), "one")
+        return row["lookup_misses"]
+
     # --- tickets and escalations ---------------------------------------------------------
     def ticket(self, cid: str, category: str, reference: str) -> dict | None:
         return self._run("select * from support_tickets where conversation_id = %s and category = %s and reference = %s",
@@ -119,12 +140,13 @@ class Repository:
         return self._run("select * from support_tickets where conversation_id = %s order by created_at", (cid,), "all")
 
     def create_ticket(self, cid: str, customer_id: str | None, category: str, priority: str, summary: str,
-                      reference: str) -> tuple[str, bool]:
+                      reference: str, caller_verified: bool = False) -> tuple[str, bool]:
         """Returns (ticket_id, created). The unique key makes a repeat return the existing ticket."""
         row = self._run(
-            "insert into support_tickets (conversation_id, customer_id, category, priority, summary, reference) "
-            "values (%s, %s, %s, %s, %s, %s) on conflict (conversation_id, category, reference) do nothing "
-            "returning ticket_id", (cid, customer_id, category, priority, summary, reference), "one")
+            "insert into support_tickets (conversation_id, customer_id, category, priority, summary, reference, "
+            "caller_verified) values (%s, %s, %s, %s, %s, %s, %s) on conflict (conversation_id, category, reference) "
+            "do nothing returning ticket_id",
+            (cid, customer_id, category, priority, summary, reference, caller_verified), "one")
         if row:
             return row["ticket_id"], True
         return self.ticket(cid, category, reference)["ticket_id"], False

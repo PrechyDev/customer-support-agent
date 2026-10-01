@@ -189,3 +189,16 @@ def test_an_overlong_message_never_reaches_claude():
         response = c.post("/chat/completions", json=body, headers={"X-RelayPay-Secret": SECRET})
     assert contents(response.text) == fallbacks.TOO_LONG
     assert manager.asked == []
+
+
+def test_a_request_vapi_cancelled_before_anything_was_said_is_not_a_turn():
+    class Cancelled(FakeManager):
+        async def ask(self, call_id, message, caller=None):
+            self.asked.append((call_id, message))
+            return
+            yield  # an agent turn that ended with nothing said and no result (Vapi cancelled it)
+
+    repo = FakeRepository()
+    with TestClient(create_app(Cancelled(), vapi_secret=SECRET, recorder=CallRecorder(repo))) as c:
+        c.post("/chat/completions", json=BODY, headers={"X-RelayPay-Secret": SECRET})
+    assert repo.turns == []

@@ -33,6 +33,9 @@ class CallRecorder:
                                 first_text_ms, total_ms)
         self._background(cid, "turn", write)
 
+    def event(self, cid: str, event_type: str, summary: str) -> None:
+        self._background(cid, "event", lambda: self._repo.log_event(cid, event_type, summary, {"source": "backend"}))
+
     def ended(self, cid: str, summary: str | None) -> None:
         self._background(cid, "end", lambda: self._repo.close_conversation(cid, summary))
 

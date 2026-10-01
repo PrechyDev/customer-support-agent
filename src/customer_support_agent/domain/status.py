@@ -10,12 +10,12 @@ from typing import Literal
 NextStep = Literal["none", "ticket", "escalate"]
 
 _LINES = {
-    "processing": "It's currently processing.",
+    "processing": "It's still being processed.",
     "scheduled": "It's scheduled.",
-    "delayed": "It's taking longer than usual.",
-    "completed": "It shows as completed.",
-    "failed": "It didn't go through.",
-    "under review": "It's under review.",
+    "delayed": "I'm sorry, it's taking a bit longer than usual.",
+    "completed": "Good news, it shows as completed.",
+    "failed": "I'm sorry, it looks like it didn't go through.",
+    "under review": "It's currently being reviewed.",
     "unknown": "I can't confirm its status right now.",
 }
 

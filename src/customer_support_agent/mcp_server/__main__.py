@@ -54,7 +54,11 @@ def main() -> int:
 
     app = create_app(kb=kb, log_store=log_store, token=settings.mcp_auth_token, host=settings.mcp_host, repo=repo)
     logger.info("MCP server '%s' listening on http://%s:%d/mcp", "relaypay", settings.mcp_host, settings.mcp_port)
-    uvicorn.run(app, host=settings.mcp_host, port=settings.mcp_port, log_config=None)
+    try:
+        uvicorn.run(app, host=settings.mcp_host, port=settings.mcp_port, log_config=None)
+    finally:
+        if repo is not None:
+            repo.close()
     return 0
 
 

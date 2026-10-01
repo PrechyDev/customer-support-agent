@@ -13,13 +13,30 @@ _NEGATED = re.compile(r"\b(?:can't|cannot|can not|won't|don't|do not|not|never|n
 _RULES = (
     ("guarantee", re.compile(r"\bguarantee", re.IGNORECASE), True),
     ("promised timing", re.compile(r"\b(?:will|should)\s+(?:arrive|land|reach you|be there|clear)\s+"
-                                   r"(?:by|on|before|tomorrow|today|within)\b", re.IGNORECASE), True),
+                                   r"(?:by|on|before|tomorrow|today|within)\b"
+                                   r"|\b(?:shortly|right away|straight away|immediately)\b"
+                                   r"|\bwithin\s+(?:\w+\s+)?(?:minutes?|hours?|days?)\b", re.IGNORECASE), True),
     ("compliance reason", re.compile(r"\bcompliance review\b", re.IGNORECASE), False),
     ("internal notes", re.compile(r"\b(?:support|internal|account)\s+notes?\b", re.IGNORECASE), False),
     ("risk logic", re.compile(r"\brisk (?:score|rules?|logic|flags?)\b", re.IGNORECASE), False),
-    ("email read aloud", re.compile(r"\b[\w.+-]+\s*(?:@|\sat\s)\s*[\w-]+\s*(?:\.|\sdot\s)\s*[a-z]{2,}\b",
-                                    re.IGNORECASE), False),
 )
+# No "email read aloud" rule: tools never give the model a stored email, so the only emails it can say are
+# ones the caller just gave, which it must read back.
+
+# What the caller says that should be on record even if the agent forgets to log it (log-only).
+_CALLER_RULES = (
+    ("injection_attempt", re.compile(r"\b(?:ignore|forget|disregard)\b[\w\s']{0,30}?\b(?:instructions|rules|prompt)\b"
+                                     r"|\bsystem prompt\b|\byour (?:instructions|prompt)\b|\bdeveloper mode\b"
+                                     r"|\bpretend (?:to be|you are)\b|\byou are now\b", re.IGNORECASE)),
+    ("sensitive_request", re.compile(r"\bwhat (?:email|phone|number|address) do you have\b|\banother customer\b"
+                                     r"|\bsomeone else'?s (?:account|details|payment)\b|\b(?:support|internal) notes?\b"
+                                     r"|\bdetails (?:for|of|about) (?:cus|customer)\b", re.IGNORECASE)),
+)
+
+
+def flag_caller(text: str) -> list[str]:
+    """Event types the caller's words suggest (injection_attempt, sensitive_request); empty if none."""
+    return [event for event, pattern in _CALLER_RULES if pattern.search(text or "")]
 
 
 def flag_phrases(text: str) -> list[str]:

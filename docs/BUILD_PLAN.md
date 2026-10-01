@@ -102,6 +102,8 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [x] Throwaway `test` schema (own ticket numbers) for smoke tests; real counters reset to T-1001 / E-1001
 - [x] Removed the unused `main.py` placeholder
 - [x] Review fixes: per-call lock can't be dropped while a tool waits; 2,000-character message cap; a repeated verification pair isn't counted (migration 003, applied to public and test); real-database tests for the SQL (`tests/db/test_repository_integration.py`)
+- [x] Voice-test fixes (TXN-9001 call): callback flow (call back or email; day, time, city, phone with country code, read back), email read-back, reference on the escalation's ticket, `caller_verified` on tickets, reference-guessing guard (3 misses), no reference-format hint, no ghost turns, escalation categories in the tool description (migration 004 on public and test)
+- [x] `relaypay-call` reads a call back from the database; `LOG_FILE` is now actually read
 
 ## Phase 5: Backend hardening
 - [x] Spoken fallback line on a Claude error or timeout
@@ -113,7 +115,7 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [x] Attempt limits (verification, repeated sensitive requests)
 
 ## Phase 6: Voice interface
-- [ ] Voice page served by FastAPI, following `DESIGN.md`, with the pre-call form (name, email required; company optional) sent as Vapi call metadata `{name, email, company}`
+- [ ] Voice page served by FastAPI, following `DESIGN.md`, with the pre-call form (name, email required; company and phone optional) sent as Vapi call metadata `{name, email, company}`
 - [ ] Vapi Web SDK with the public key only
 - [ ] States: idle, connecting, listening, agent speaking, ended, mic denied, error
 - [ ] Works on mobile width

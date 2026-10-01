@@ -7,6 +7,7 @@ from customer_support_agent.mcp_server import __main__ as entry
 def no_dotenv(monkeypatch):
     # Never read the developer's real .env during tests.
     monkeypatch.setattr(entry, "load_dotenv", lambda *a, **k: False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)  # never a real database here
 
 
 @pytest.fixture

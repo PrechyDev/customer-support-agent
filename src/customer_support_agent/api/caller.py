@@ -1,4 +1,4 @@
-"""The pre-call form (name, email, optional company), as Vapi passes it along with each request.
+"""The pre-call form (name, email; optional company and phone), as Vapi passes it along with each request.
 
 The voice page sends it as call metadata. Depending on the Vapi setting it arrives at the top of the
 request (metadataSendMode "variable"), or inside the call or assistant. It's typed by the caller, so it's
@@ -8,7 +8,7 @@ cleaned and capped here: it's contact information only, never proof of identity 
 import re
 from typing import Any
 
-from customer_support_agent.domain.normalise import normalise_email
+from customer_support_agent.domain.normalise import normalise_email, normalise_phone
 
 MAX_NAME = 80
 MAX_COMPANY = 100
@@ -41,6 +41,7 @@ def caller_from_vapi(body: Any) -> dict[str, str] | None:
             "name": _clean(block.get("name"), MAX_NAME),
             "email": normalise_email(email) if isinstance(email, str) else None,
             "company": _clean(block.get("company"), MAX_COMPANY),
+            "phone": normalise_phone(block.get("phone")) if isinstance(block.get("phone"), str) else None,
         }
         caller = {k: v for k, v in caller.items() if v}
         if caller:

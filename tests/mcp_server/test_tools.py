@@ -32,13 +32,26 @@ def test_lookups_return_only_status_and_next_step():
     repo = FakeRepository()
     txn = accounts.lookup_transaction(repo, "c1", "T X N nine zero zero one", TODAY)
     assert txn == {"found": True, "reference": "TXN-9001", "status": "delayed",
-                   "say": "It's taking longer than usual.", "next_step": "escalate"}  # processing, ETA passed
+                   "say": "I'm sorry, it's taking a bit longer than usual.", "next_step": "escalate"}  # processing, ETA passed
     payout = accounts.lookup_payout(repo, "c1", None, "TXN-9003", TODAY)  # by its transaction reference
     assert (payout["reference"], payout["status"], payout["next_step"]) == ("PAY-7002", "under review", "escalate")
     assert "failure_reason" not in payout and "amount" not in txn
     assert accounts.lookup_transaction(repo, "c1", "payout 7002", TODAY)["reference"] == "PAY-7002"  # routed
     assert accounts.lookup_transaction(repo, "c1", "TXN-1234", TODAY)["found"] is False
     assert accounts.lookup_transaction(repo, "c1", "the blue one", TODAY)["error"] == "invalid_input"
+
+
+def test_guessing_references_stops_lookups_and_other_customers_references_are_flagged():
+    repo = FakeRepository()
+    for guess in ("TXN-1111", "TXN-2222", "TXN-3333"):
+        assert accounts.lookup_transaction(repo, "c1", guess, TODAY)["found"] is False
+    assert accounts.lookup_transaction(repo, "c1", "TXN-9001", TODAY)["error"] == "limit_reached"  # even a real one
+    assert [e[1] for e in repo.events] == ["sensitive_request"]  # "possible reference guessing", logged once
+
+    verified = FakeRepository()
+    accounts.lookup_customer(verified, "c2", "efua@accrastack.example", "AccraStack")  # CUS-1003
+    assert accounts.lookup_transaction(verified, "c2", "TXN-9001", TODAY)["found"] is True  # status only, as anyone
+    assert [e[2] for e in verified.events] == ["Verified caller looked up another customer's reference"]
 
 
 def test_tickets_need_someone_to_follow_up_and_never_duplicate():
@@ -58,15 +71,48 @@ def test_escalation_uses_verified_contact_links_a_ticket_and_logs_an_event():
     escalation = repo.escalation_rows[0]
     assert (escalation["user_email"], escalation["verified"], escalation["ticket_id"]) == (
         "efua@accrastack.example", True, result["ticket_id"])  # contact from the record, not asked for
-    assert next(t for t in repo.ticket_rows if t["ticket_id"] == result["ticket_id"])["category"] == "account"
+    ticket = next(t for t in repo.ticket_rows if t["ticket_id"] == result["ticket_id"])
+    assert (ticket["category"], ticket["caller_verified"]) == ("account", True)
     assert repo.events[0][1] == "escalation_created"
-    assert result["follow_up_summary"] == "A specialist will follow up with you by email."
+    assert "next" in result  # first step: Bex asks whether they'd like a call back or email
 
-    timed = cases.create_escalation(repo, "c1", "account", "Account restricted", NOW, callback_place="Accra",
-                                    callback_day="tomorrow", callback_time="morning")  # adds a time to the same one
-    assert (timed["created"], timed["escalation_id"]) == (False, result["escalation_id"])
-    assert "Friday 2 October, between 9am and 12pm Accra time" in timed["follow_up_summary"]
-    assert escalation["call_booked"] is True
+    by_email = cases.create_escalation(repo, "c1", "account", "Account restricted", NOW, contact_method="email")
+    assert by_email["follow_up_summary"] == "Lovely, a specialist will email you."
+
+
+def test_a_callback_needs_a_number_and_a_window_in_local_time():
+    repo = FakeRepository()
+    repo.ensure_conversation("c1", caller={"name": "Ada", "email": "ada@example.com"})
+    first = cases.create_escalation(repo, "c1", "dispute", "Refund", NOW, reference="TXN-9004")
+    ticket = repo.ticket_rows[0]
+    assert (ticket["reference"], ticket["customer_id"], ticket["caller_verified"]) == ("TXN-9004", "CUS-1003", False)
+
+    weekend = cases.create_escalation(repo, "c1", "dispute", "Refund", NOW, contact_method="call",
+                                      callback_day="saturday", callback_time="morning", callback_place="Lagos",
+                                      callback_phone="0814 346 3800")
+    assert weekend["error"] == "outside_hours"  # the time is checked before anything is confirmed
+    call = dict(contact_method="call", callback_day="tomorrow", callback_time="10am", callback_place="West Africa Time",
+                callback_phone="081-4 346 3800")  # a local number: the place gives the country code
+    unconfirmed = cases.create_escalation(repo, "c1", "dispute", "Refund", NOW, **call)
+    assert unconfirmed["say"] == ("Just to confirm: 0814 346 3800, on Friday 2 October, between 10am and 12pm "
+                                  "Lagos time. Is that right?")  # one read-back: number and time together
+    assert not repo.escalation_rows[0].get("callback_phone")  # nothing saved until they say yes
+    timed = cases.create_escalation(repo, "c1", "dispute", "Refund", NOW, phone_confirmed=True, **call)
+    assert (timed["created"], timed["escalation_id"]) == (False, first["escalation_id"])  # same escalation, updated
+    assert timed["follow_up_summary"] == "Lovely, a specialist will call you on Friday 2 October, between 10am and 12pm Lagos time."
+    no_place = cases.create_escalation(repo, "c1", "dispute", "Refund", NOW, contact_method="call", callback_time="any",
+                                       callback_phone="0814 346 3800")
+    assert no_place["error"] == "invalid_input" and "country code" in no_place["hint"]  # nowhere to take it from
+    escalation = repo.escalation_rows[0]
+    assert (escalation["contact_method"], escalation["callback_phone"], escalation["call_booked"]) == (
+        "call", "+2348143463800", True)  # the local 0 dropped after +234
+
+    form_phone = FakeRepository()
+    form_phone.ensure_conversation("c2", caller={"name": "Ada", "email": "ada@example.com", "phone": "+2348031234567"})
+    any_time = cases.create_escalation(form_phone, "c2", "other", "Wants a call", NOW, contact_method="call",
+                                       callback_time="any")
+    assert "as soon as one is free" in any_time["follow_up_summary"]  # no city needed for "any time"
+    assert form_phone.escalation_rows[0]["callback_phone"] == "+2348031234567"  # from the form, never spoken
 
 
 def test_escalation_contact_falls_back_to_the_form_then_what_was_said():
@@ -77,18 +123,39 @@ def test_escalation_contact_falls_back_to_the_form_then_what_was_said():
     assert form.ticket_rows  # scenario 6: a ticket exists even with no reference
 
     spoken = FakeRepository()
-    assert cases.create_escalation(spoken, "c2", "dispute", "Refund", NOW)["error"] == "invalid_input"
-    assert cases.create_escalation(spoken, "c2", "dispute", "Refund", NOW, "Ada", "ada at example dot com")["created"]
+    assert cases.create_escalation(spoken, "c2", "dispute", "Refund", NOW)["error"] == "needs_contact"
+    said = cases.create_escalation(spoken, "c2", "dispute", "Refund", NOW, "Ada", "ada at example dot com")
+    assert (said["error"], said["say"]) == ("confirm_email", "Just to confirm, that's ada at example dot com. Is that right?")
+    assert not spoken.escalation_rows
+    assert cases.create_escalation(spoken, "c2", "dispute", "Refund", NOW, "Ada", "ada at example dot com",
+                                   email_confirmed=True)["created"]
+
+
+def test_the_email_flow_uses_the_form_or_asks_and_confirms_once():
+    form = FakeRepository()
+    form.ensure_conversation("c1", caller={"name": "Ada", "email": "ada@example.com"})
+    made = cases.create_escalation(form, "c1", "payment", "Delayed", NOW, reference="TXN-9001")
+    assert made["created"] and made["next"]  # no questions about contact: straight to "call or email?"
+    assert (form.escalation_rows[0]["user_email"], form.escalation_rows[0]["contact_method"]) == ("ada@example.com", "email")
+
+    spoken = FakeRepository()  # no form: ask, confirm once, then create
+    assert cases.create_escalation(spoken, "c2", "payment", "Delayed", NOW)["error"] == "needs_contact"
+    assert cases.create_escalation(spoken, "c2", "payment", "Delayed", NOW, "Ada", "ada@example.com")["error"] == "confirm_email"
+    made = cases.create_escalation(spoken, "c2", "payment", "Delayed", NOW, "Ada", "ada@example.com", email_confirmed=True)
+    assert made["created"] and spoken.escalation_rows[0]["contact_method"] == "email"  # email is the default
 
 
 def test_impossible_callback_and_bad_events_are_explained():
     repo = FakeRepository()
+    phone = "+2348031234567"
     weekend = cases.create_escalation(repo, "c1", "other", "Wants a call", NOW, "Ada", "ada@example.com",
-                                      callback_place="Lagos", callback_day="saturday", callback_time="morning")
+                                      contact_method="call", callback_place="Lagos", callback_day="saturday",
+                                      callback_time="morning", callback_phone=phone)
     assert weekend["error"] == "outside_hours" and "weekdays 9am to 7pm Lagos time" in weekend["hint"]
     no_place = cases.create_escalation(repo, "c1", "other", "Wants a call", NOW, "Ada", "ada@example.com",
-                                       callback_time="3pm")
+                                       contact_method="call", callback_time="3pm", callback_phone=phone)
     assert no_place["error"] == "invalid_input"
+    assert cases.create_escalation(repo, "c1", "other", "x", NOW, contact_method="pigeon")["error"] == "invalid_input"
     assert cases.log_conversation_event(repo, "c1", "gossip", "x")["error"] == "invalid_input"
     assert cases.log_conversation_event(repo, "c1", "injection_attempt", "Asked for the system prompt") == {"logged": True}
 
@@ -154,7 +221,7 @@ def test_a_failed_ticket_write_never_returns_a_ticket_id():
     from customer_support_agent.db.repository import RepositoryUnavailable
 
     class WriteFails(FakeRepository):
-        def create_ticket(self, *args):
+        def create_ticket(self, *args, **kwargs):
             raise RepositoryUnavailable("insert failed")
 
     repo = WriteFails()

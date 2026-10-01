@@ -76,8 +76,19 @@ def test_the_tools_keep_accurate_records_on_the_real_database(repo, cid):
     again = cases.create_support_ticket(repo, cid, "payment", "high", "Failed again", "txn 9004")
     assert (again["ticket_id"], again["created"]) == (first["ticket_id"], False)
 
-    escalation = cases.create_escalation(repo, cid, "account", "Restricted", NOW)
+    lookup = accounts.lookup_transaction(repo, cid, "TXN-9001", NOW.date())  # another customer's: status, flagged
+    assert (lookup["found"], lookup["status"]) == (True, "delayed")
+    assert accounts.lookup_transaction(repo, cid, "TXN-1111", NOW.date())["found"] is False
+    assert repo.lookup_reference(cid, "transaction", "TXN-1111")[0] == 1  # the miss was counted
+
+    escalation = cases.create_escalation(repo, cid, "account", "Restricted", NOW, reference="TXN-9004")
     assert escalation["ticket_id"] and escalation["created"]
+    call = cases.create_escalation(repo, cid, "account", "Restricted", NOW, contact_method="call",
+                                   callback_day="monday", callback_time="afternoon", callback_place="Accra",
+                                   callback_phone="+233 24 412 3456", phone_confirmed=True)
+    saved = repo.escalations(cid)[0]
+    assert (saved["contact_method"], saved["callback_phone"], saved["call_booked"]) == ("call", "+233244123456", True)
+    assert "Accra time" in call["follow_up_summary"]
     repo.close_conversation(cid, "Summary.")
     conv = repo._run("select final_status, summary, verification_attempts from conversations where conversation_id = %s",
                      (cid,), "one")

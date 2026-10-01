@@ -14,6 +14,7 @@ _background: set[asyncio.Task] = set()
 
 # Caps per call (SPECS §9): stop abuse of one call spilling into the database or the support queue.
 MAX_VERIFICATION_ATTEMPTS = 2
+MAX_LOOKUP_MISSES = 3  # references not found per call, then lookups stop (guessing guard)
 MAX_TICKETS = 3
 MAX_ESCALATIONS = 2
 TICKET_CATEGORIES = ("compliance", "account", "dispute", "payment", "other")
