@@ -145,6 +145,20 @@ def load_backend_settings(env: Mapping[str, str] | None = None) -> BackendSettin
     )
 
 
+@dataclass(frozen=True)
+class VoiceSettings:
+    """What the voice page needs to start a Vapi web call. Both values are PUBLIC (safe in the browser)."""
+    public_key: str | None
+    assistant_id: str | None
+
+
+def load_voice_settings(env: Mapping[str, str] | None = None) -> VoiceSettings:
+    """Optional: without them the voice page still loads, but /voice/config answers 503."""
+    env = os.environ if env is None else env
+    return VoiceSettings(public_key=env.get("VAPI_PUBLIC_KEY", "").strip() or None,
+                         assistant_id=env.get("VAPI_ASSISTANT_ID", "").strip() or None)
+
+
 def load_agent_settings(env: Mapping[str, str] | None = None) -> AgentSettings:
     """Settings for the Agent SDK sessions. Kept separate so the MCP server doesn't need an Anthropic key."""
     env = os.environ if env is None else env

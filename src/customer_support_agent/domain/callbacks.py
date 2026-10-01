@@ -182,3 +182,14 @@ def callback_window(place: str | None, day: str, when: str, now_utc: datetime) -
     lo_local, hi_local = best[0].astimezone(zone), best[1].astimezone(zone)
     spoken = f"{lo_local:%A} {lo_local.day} {lo_local:%B}, between {_clock(lo_local)} and {_clock(hi_local)} {_city(zone)} time"
     return CallbackWindow(start_utc=best[0], end_utc=best[1], timezone=zone.key, spoken=spoken)
+
+
+def spoken_window(start_utc: datetime, end_utc: datetime, timezone: str) -> str:
+    """A stored callback window as the caller hears it: "Friday 2 October, between 10am and 12pm Lagos time".
+    Same wording as CallbackWindow.spoken. Raises CallbackError for an unknown time zone."""
+    try:
+        zone = ZoneInfo(timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise CallbackError("unknown_timezone", f"Unknown stored time zone '{timezone}'.") from None
+    lo, hi = start_utc.astimezone(zone), end_utc.astimezone(zone)
+    return f"{lo:%A} {lo.day} {lo:%B}, between {_clock(lo)} and {_clock(hi)} {_city(zone)} time"

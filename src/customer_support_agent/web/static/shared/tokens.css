@@ -1,0 +1,54 @@
+/* RelayPay design tokens (design_handoff_relaypay_v1/README.md "Design Tokens").
+   The only place colours are defined: everything else uses var(--…). No shadows, no gradients. */
+:root {
+  /* Text */
+  --ink: #0F1B2D;
+  --ink-2: #5A6475;
+  --ink-3: #6B7483;
+  --ink-4: #8A93A1;
+
+  /* Brand */
+  --brand: #0E3476;
+  --brand-hover: #0A2860;
+  --teal: #1683AC;
+  --danger: #B42318;
+  --danger-hover: #912018;
+
+  /* Surfaces and lines */
+  --page: #F5F6F8;
+  --surface: #FFFFFF;
+  --subtle: #FAFBFC;
+  --border: #E3E6EB;
+  --border-input: #D5DAE1;
+  --divider: #EDEFF2;
+  --divider-2: #F1F3F6;
+  --row-hover: #F7F9FB;
+  --nav-active: #E8EEF8;
+  --selected-row: #F3F6FB;
+
+  /* Status badges: background / text */
+  --green-bg: #EAF5EC;  --green-fg: #1E6B34;
+  --blue-bg: #E8EEF8;   --blue-fg: #0E3476;
+  --teal-bg: #E6F3F8;   --teal-fg: #0E5E7E;
+  --amber-bg: #FBF1E1;  --amber-fg: #8A5300;
+  --red-bg: #FBEAE8;    --red-fg: #A3261B;
+  --grey-bg: #F1F3F6;   --grey-fg: #4A5465;
+
+  /* Voice ring and outcome boxes */
+  --bar-idle: #C3CAD4;
+  --ring-live-border: #C6E1EC;
+  --ring-live-bg: #F3F9FB;
+  --ring-error-border: #F3C7C2;
+  --ok-box-bg: #EEF7F0;  --ok-box-border: #CFE7D5;
+  --esc-box-bg: #EAF4F8; --esc-box-border: #C6E1EC;
+
+  /* Shape */
+  --radius-badge: 4px;
+  --radius-control: 6px;
+  --radius-card: 8px;
+  --radius-panel: 12px;
+
+  /* Type and motion */
+  --font: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}

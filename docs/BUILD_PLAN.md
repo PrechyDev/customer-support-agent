@@ -15,7 +15,7 @@ State: **backend done and voice-tested** (Phase 3 + fixes from 4 voice calls, co
 **The frontend is handed to a new session: follow `docs/FRONTEND_PLAN.md`** (scope in/out, endpoints, migration 005,
 security rules, tests, build order). Design source: `../design_handoff_relaypay_v1/` (README is the spec).
 
-1. [ ] Voice page + pre-call form + live captions + greeting by name + outcome box + rating (FRONTEND_PLAN §3–§5.1)
+1. [x] Voice page + pre-call form + live captions + greeting by name + outcome box + rating (FRONTEND_PLAN §3–§5.1). Built 01-10; migration 005 to apply
 2. [ ] User test call through the page: form data reaches the call record (`relaypay-call`)
 3. [ ] Console: sign-in, Dashboard, Cases (resolve with note), Conversations, Customers, new-item ping (§3, §5.2–§5.3)
 4. [ ] Deploy (Phase 7), then the 9 test scenarios by voice (combined into ~3 calls), evidence, Loom, reflections, one-pager
@@ -112,10 +112,12 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [x] Attempt limits (verification, repeated sensitive requests)
 
 ## Phase 6: Voice interface (plan: `docs/FRONTEND_PLAN.md`)
-- [ ] Voice page served by FastAPI, following `DESIGN.md`, with the pre-call form (name, email required; company and phone optional) sent as Vapi call metadata `{name, email, company}`
-- [ ] Vapi Web SDK with the public key only
-- [ ] States: idle, connecting, listening, agent speaking, ended, mic denied, error
-- [ ] Works on mobile width
+- [x] Voice page served by FastAPI, following the handoff, with the pre-call form (name, email required; company and phone optional) sent as Vapi call metadata `{name, email, company, phone}`
+- [x] Vapi Web SDK (`@vapi-ai/web@2.7.1`, pinned) with the public key only (`GET /voice/config`)
+- [x] States: idle, connecting, listening, agent speaking, "one moment", muted, ended, mic denied, connection error
+- [x] Works on mobile width (checked at 320 and 1440 px, keyboard order checked)
+- [x] Live captions, greeting by first name (`variableValues.name`), outcome box + rating (`/voice/calls/{id}/outcome`, `/rating`), migration 005
+- [ ] User applies migration 005 + `.env` values + Vapi first message (FRONTEND_PLAN §6–§7), then test call #1 through the page
 
 ## Phase 7: Deploy (see Deployment guide)
 - [ ] Dockerfile

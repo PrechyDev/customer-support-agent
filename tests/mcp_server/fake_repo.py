@@ -1,6 +1,6 @@
 """An in-memory stand-in for the Supabase repository, with the seed data. Same method names."""
 
-from datetime import date
+from datetime import UTC, date, datetime
 from itertools import count
 
 from customer_support_agent.db.repository import RepositoryUnavailable
@@ -46,7 +46,8 @@ class FakeRepository:
                                                     "verified_customer_id": None, "caller_name": None,
                                                     "caller_email": None, "caller_company": None, "model": None,
                                                     "last_verification_try": None, "caller_phone": None,
-                                                    "lookup_misses": 0})
+                                                    "lookup_misses": 0, "started_at": datetime.now(UTC),
+                                                    "rating": None})
         conv["model"] = model or conv["model"]
         for key in ("name", "email", "company", "phone"):
             if caller and caller.get(key):
@@ -137,3 +138,22 @@ class FakeRepository:
 
     def log_turn(self, *args):
         self.turns.append(args)
+
+    def voice_outcome(self, cid):
+        self._check()
+        conv = self.conversations.get(cid)
+        if conv is None:
+            return None
+        escalation = (self.escalations(cid) or [{}])[-1]
+        ticket = (self.tickets(cid) or [{}])[0]
+        keys = ("escalation_id", "contact_method", "call_booked", "callback_start_utc", "callback_end_utc",
+                "callback_timezone", "user_email")
+        return {"started_at": conv["started_at"], **{k: escalation.get(k) for k in keys},
+                "ticket_id": ticket.get("ticket_id")}
+
+    def save_rating(self, cid, rating):
+        self._check()
+        if self.conversations[cid].get("rating"):
+            return False
+        self.conversations[cid]["rating"] = rating
+        return True

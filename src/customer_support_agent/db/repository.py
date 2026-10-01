@@ -176,6 +176,24 @@ class Repository:
         self._run(f"update escalations set {sets}, updated_at = now() where escalation_id = %s",
                   (*values.values(), escalation_id))
 
+    # --- voice page (FRONTEND_PLAN §5.1) ---------------------------------------------------
+    def voice_outcome(self, cid: str) -> dict | None:
+        """One round trip: when the call started, its latest escalation and its first ticket. None if no such call."""
+        return self._run(
+            "select c.started_at, e.escalation_id, e.contact_method, e.call_booked, e.callback_start_utc, "
+            "e.callback_end_utc, e.callback_timezone, e.user_email, t.ticket_id from conversations c "
+            "left join lateral (select * from escalations where conversation_id = c.conversation_id "
+            "order by created_at desc limit 1) e on true "
+            "left join lateral (select ticket_id from support_tickets where conversation_id = c.conversation_id "
+            "order by created_at limit 1) t on true where c.conversation_id = %s",
+            (cid,), "one")
+
+    def save_rating(self, cid: str, rating: str) -> bool:
+        """Saved once: a later rating for the same call is ignored (returns False)."""
+        row = self._run("update conversations set rating = %s, rated_at = now() where conversation_id = %s "
+                        "and rating is null returning conversation_id", (rating, cid), "one")
+        return row is not None
+
     # --- logs (called in the background; failures are logged by the caller, never raised to the caller's caller)
     def log_event(self, cid: str, event_type: str, summary: str, metadata: dict | None = None) -> None:
         self._run("insert into conversation_events (conversation_id, event_type, summary, metadata) values (%s, %s, %s, %s)",

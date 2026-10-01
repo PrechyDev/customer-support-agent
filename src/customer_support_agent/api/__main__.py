@@ -25,6 +25,7 @@ from customer_support_agent.config import (
     load_database_schema,
     load_database_url,
     load_settings,
+    load_voice_settings,
 )
 from customer_support_agent.db.repository import Repository
 from customer_support_agent.kb import KnowledgeBase, KnowledgeBaseError
@@ -50,6 +51,7 @@ def main() -> int:
         backend = load_backend_settings()
         database_url = load_database_url()  # the backend keeps records of every call, so it's required
         schema = load_database_schema()
+        voice = load_voice_settings()  # optional: the voice page needs them to start calls
     except ConfigError as exc:
         logger.error("Backend not started: %s", exc)
         return EXIT_CONFIG_ERROR
@@ -79,7 +81,10 @@ def main() -> int:
                              idle_seconds=agent_settings.session_idle_seconds,
                              wait_seconds=agent_settings.turn_timeout_seconds, on_idle_close=recorder.abandoned,
                              on_stuck=escalate_stuck)
-    app = create_app(manager, vapi_secret=backend.vapi_llm_secret, recorder=recorder)
+    app = create_app(manager, vapi_secret=backend.vapi_llm_secret, recorder=recorder, voice=voice,
+                     repo=repo)
+    if not (voice.public_key and voice.assistant_id):
+        logger.warning("VAPI_PUBLIC_KEY / VAPI_ASSISTANT_ID not set: the voice page can't start calls")
 
     logger.info("Agent model: %s; database schema: %s", agent_settings.model, schema)
     try:

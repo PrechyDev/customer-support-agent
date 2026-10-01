@@ -1,0 +1,66 @@
+/* Shared base styles for the voice page and the console. Colours come from tokens.css only. */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { margin: 0; background: var(--page); }
+body {
+  font-family: var(--font);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--brand); }
+a:hover { color: var(--teal); }
+
+:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+[hidden] { display: none !important; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* Buttons */
+.btn {
+  height: 44px; padding: 0 22px; border-radius: var(--radius-card);
+  font: inherit; font-size: 15px; font-weight: 500;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  cursor: pointer; border: 1px solid transparent; text-decoration: none;
+  transition: background-color 120ms var(--ease), opacity 120ms var(--ease);
+}
+.btn svg { flex: none; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-primary { background: var(--brand); color: var(--surface); }
+.btn-primary:hover:not(:disabled) { background: var(--brand-hover); color: var(--surface); }
+.btn-secondary { background: var(--surface); color: var(--ink); border-color: var(--border-input); }
+.btn-secondary:hover:not(:disabled) { background: var(--page); color: var(--ink); }
+.btn-danger { background: var(--danger); color: var(--surface); }
+.btn-danger:hover:not(:disabled) { background: var(--danger-hover); color: var(--surface); }
+.btn-small { height: 36px; padding: 0 16px; border-radius: var(--radius-control); font-size: 14px; font-weight: 400; }
+.link-button {
+  border: none; background: none; padding: 0; font: inherit; font-size: 13px;
+  color: var(--brand); cursor: pointer; position: relative;
+}
+.link-button::after { content: ""; position: absolute; inset: -14px -10px; } /* 44px tap target, same layout */
+.link-button:hover { color: var(--teal); }
+
+/* Form fields */
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field label { font-size: 13px; font-weight: 500; }
+.field .optional { font-weight: 400; color: var(--ink-3); }
+.field input {
+  height: 44px; padding: 0 12px; width: 100%;
+  border: 1px solid var(--border-input); border-radius: var(--radius-card);
+  font: inherit; font-size: 14px; color: var(--ink); background: var(--surface);
+}
+.field input::placeholder { color: var(--ink-4); }
+.field input:focus-visible { outline: 2px solid var(--teal); outline-offset: 0; border-color: var(--teal); }
+.field input[aria-invalid="true"] { border-color: var(--danger); }
+.field .hint { font-size: 12px; color: var(--ink-3); }
+.field .error { font-size: 13px; color: var(--red-fg); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

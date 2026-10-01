@@ -21,6 +21,8 @@ from customer_support_agent.api.caller import caller_from_vapi
 from customer_support_agent.api.heard import heard_note
 from customer_support_agent.api.openai_format import RequestError, completion, parse_request, sse_chunk, sse_done
 from customer_support_agent.api.records import CallRecorder
+from customer_support_agent.api.web import mount_web
+from customer_support_agent.config import VoiceSettings
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +64,8 @@ def _reject(request: Request, secret: str) -> JSONResponse:
 
 def create_app(manager: Manager, vapi_secret: str,
                reassure_after: float = fallbacks.REASSURANCE_AFTER_SECONDS,
-               recorder: CallRecorder | None = None) -> FastAPI:
+               recorder: CallRecorder | None = None, voice: VoiceSettings | None = None,
+               repo: Any | None = None) -> FastAPI:
     recorder = recorder or CallRecorder(None)  # no database: nothing is recorded, calls still work
 
     @asynccontextmanager
@@ -194,6 +197,7 @@ def create_app(manager: Manager, vapi_secret: str,
         logger.debug("Vapi event: type=%s status=%s call=%s", kind, message.get("status"), call_id)
         return {"ok": True}
 
+    mount_web(app, voice or VoiceSettings(None, None), repo)  # the voice page and its API
     return app
 
 

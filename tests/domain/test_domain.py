@@ -80,3 +80,12 @@ def test_impossible_windows_give_a_hint_the_agent_can_say():
         with pytest.raises(CallbackError) as exc:
             callback_window(place, day, when, NOW)
         assert exc.value.code == code
+
+
+def test_stored_callback_window_is_spoken_in_the_callers_time():
+    from customer_support_agent.domain.callbacks import spoken_window
+    start, end = datetime(2026, 10, 2, 9, tzinfo=UTC), datetime(2026, 10, 2, 11, tzinfo=UTC)
+    assert spoken_window(start, end, "Africa/Lagos") == "Friday 2 October, between 10am and 12pm Lagos time"
+    assert spoken_window(start, end, "Etc/GMT-1").endswith("UTC+1 time")  # an offset is said back as given
+    with pytest.raises(CallbackError):
+        spoken_window(start, end, "Mars/Olympus")

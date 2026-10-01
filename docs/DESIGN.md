@@ -1,6 +1,6 @@
 # Design
 
-> **01-10-2026: superseded for build purposes by `../../design_handoff_relaypay_v1/README.md`** (Claude Design handoff, high fidelity) and the scope in `docs/FRONTEND_PLAN.md`. Update the tokens below to the handoff's when the frontend is built.
+> **01-10-2026: the handoff is the source of truth: `../../design_handoff_relaypay_v1/README.md`** (Claude Design handoff, high fidelity) and the scope in `docs/FRONTEND_PLAN.md`. §2 and §4 below now match what was built.
 
 The visual and interaction design for the two screens: the **voice page** (for customers) and the **support console** (for RelayPay staff).
 
@@ -23,22 +23,20 @@ RelayPay handles money, compliance and trust-sensitive work. The interface shoul
 
 ## 2. Colour tokens
 
-The brand gives the colour *names* only. The hex values are **proposals**, to be replaced by the mockup's values. Every text and background pair must meet WCAG AA contrast (4.5:1 for body text).
+From the design handoff (01-10-2026), in `src/customer_support_agent/web/static/shared/tokens.css`: the **only** place colours are
+defined; everything else uses `var(--…)`. No shadows, no gradients.
 
-| Token | Use | Proposed value |
+| Token | Use | Value |
 |---|---|---|
-| `--color-primary` | Deep blue: main button, logo, headings | `#0F2D52` |
-| `--color-accent` | Teal blue: active and listening state, links, focus ring. Used sparingly | `#0E7C86` |
-| `--color-bg` | Page background (off-white or light grey) | `#F6F7F9` |
-| `--color-surface` | Cards and panels | `#FFFFFF` |
-| `--color-text` | Body text | `#1A2233` |
-| `--color-text-muted` | Secondary text, timestamps | `#5B6576` |
-| `--color-border` | Dividers, card borders | `#E2E6EC` |
-| `--color-success` | Completed, closed | `#1E7B4F` |
-| `--color-warning` | Delayed, in progress | `#9A6700` |
-| `--color-danger` | Errors, failed, escalated | `#B42318` |
+| `--ink` / `--ink-2` / `--ink-3` / `--ink-4` | Text: primary / secondary / meta / placeholder | `#0F1B2D` / `#5A6475` / `#6B7483` / `#8A93A1` |
+| `--brand` (hover `--brand-hover`) | Primary buttons, links, active nav, "RelayPay" caption label | `#0E3476` (`#0A2860`) |
+| `--teal` | Listening state, focus outline, link hover | `#1683AC` |
+| `--page` / `--surface` / `--subtle` | Background / cards / insets | `#F5F6F8` / `#FFFFFF` / `#FAFBFC` |
+| `--border` / `--border-input` / `--divider` | Card borders / inputs and secondary buttons / section lines | `#E3E6EB` / `#D5DAE1` / `#EDEFF2` |
+| `--danger` (hover `--danger-hover`) | End call, error ring | `#B42318` (`#912018`) |
+| Badges `--{green,blue,teal,amber,red,grey}-{bg,fg}` | Status badges (console) | handoff README "Status badges" |
 
-Buttons, active states and highlights use colour **with restraint**. There is one primary action per screen.
+Focus: a 2px teal outline. Buttons, active states and highlights use colour **with restraint**: one primary action per screen.
 
 ---
 
@@ -51,34 +49,30 @@ Buttons, active states and highlights use colour **with restraint**. There is on
 
 ---
 
-## 4. Voice page (customers)
+## 4. Voice page (customers): as built (01-10-2026)
 
-**Layout:** a single-screen flow. The logo is **centred at the top** (the brand allows top-left or centred; centred suits a single-screen flow). The call control sits in the middle, with a short line of help text below it.
+Served at `/` by FastAPI. Plain HTML, CSS and JS modules, no build step (`web/static/voice/`). Layout, copy and states
+follow the handoff's "Screen 1", with the copy changes in FRONTEND_PLAN §4.6.
 
-**Content:**
-- Title: "RelayPay Support"
-- One line: "Talk to our support assistant about payments, payouts, invoices and your account."
-- **Call button:** the primary action. "Start call" / "End call".
-- **Status line:** says in words what's happening (see states).
-- **Live captions (optional):** the last line said by each side, shown as plain text, not bubbles. This helps with noisy rooms and hearing impairments.
-- **Privacy note, small:** "Calls are recorded and transcribed to help our support team."
-- **Demo notice, small:** "Demo environment: sample account data."
-
-**States (all must be designed):**
-
-| State | What the user sees |
-|---|---|
-| Idle | "Start call" button, help text |
-| Connecting | Button disabled, "Connecting…" |
-| Listening | Calm teal indicator, "Listening…" |
-| Agent speaking | Indicator changes, "Speaking…" |
-| Ended | "Call ended. Thanks for contacting RelayPay." Button returns to "Start call" |
-| Mic permission denied | Plain explanation of how to allow the mic, and a retry button |
-| Error / connection lost | "We couldn't connect. Please try again." and a retry button. Never a raw error message |
-
-**Behaviour:**
-- The logo isn't animated. The listening and speaking indicator is the only motion, and it's subtle. It respects `prefers-reduced-motion`.
-- No keys in the page except Vapi's **public** key.
+- **Two screens** (changed 01-10 after the user's first look):
+  1. **Details:** header, the form in one column (Name and Email required, Company and Phone optional; phone needs a
+     country code), a full-width Start call button, then "You can ask about" and the help lines. Errors show only after
+     a field was typed in and left, or after pressing Start call (which then jumps to the first wrong field).
+  2. **Call:** "Calling as {name} · {email}" (Edit after the call), the ring, status and buttons, then the outcome and
+     transcript. "Start a new conversation" goes back to the details screen with the values kept.
+- **Connecting:** "Calling RelayPay", and a soft ringing tone (400 + 450 Hz double ring, Web Audio, no file) from the
+  moment the mic is allowed until Vapi connects; it also stops on Cancel, an error or after 30 s.
+- **Call states:** connecting (Cancel), live (Listening / RelayPay is speaking / One moment / You are muted,
+  `m:ss` timer), ended, error (Microphone unavailable, or Call could not connect, with Try again and Back). Never a raw error.
+- **Ring:** 5 bars; teal 1.4 s while listening, brand 0.9 s while speaking, still at 0.5 opacity for "One moment".
+  `prefers-reduced-motion` stops all animation.
+- **Live captions:** "You" / "RelayPay" rows, no bubbles; text in progress in ink-3, replaced by the final line;
+  auto-scroll unless scrolled up; Hide/Show; kept after the call. Inserted with `textContent` only.
+- **After the call:** an outcome box from our own records (Callback requested / Passed to a specialist / Ticket created /
+  Thanks for calling; never "booked" or a timeline), "Did this help?" Yes/No (saved once), "Start a new conversation"
+  (the form keeps its values).
+- **Out:** text chat, email summary, tool-name hints, the help-centre tile and support email (FRONTEND_PLAN §3).
+- No keys in the page except Vapi's **public** key, fetched from `/voice/config`.
 
 ---
 

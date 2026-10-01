@@ -93,3 +93,15 @@ def test_the_tools_keep_accurate_records_on_the_real_database(repo, cid):
     conv = repo._run("select final_status, summary, verification_attempts from conversations where conversation_id = %s",
                      (cid,), "one")
     assert (conv["final_status"], conv["summary"], conv["verification_attempts"]) == ("escalated", "Summary.", 2)  # wrong, (repeat skipped), right
+
+
+def test_voice_outcome_and_rating_on_the_real_database(repo, cid):
+    """Needs migration 005 on the test schema."""
+    assert repo.voice_outcome("dbtest-no-such-call") is None
+    repo.ensure_conversation(cid, caller={"name": "Ada", "email": "ada@example.com"})
+    assert repo.voice_outcome(cid)["escalation_id"] is None
+    cases.create_escalation(repo, cid, "account", "Restricted", NOW, reference="TXN-9004")
+    row = repo.voice_outcome(cid)
+    assert row["escalation_id"] and row["ticket_id"] and row["contact_method"] == "email"
+    assert row["started_at"].tzinfo is not None  # compared with an aware "now" by the endpoint
+    assert repo.save_rating(cid, "yes") and not repo.save_rating(cid, "no")  # saved once

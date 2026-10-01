@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RelayPay Customer Support</title>
+<meta name="description" content="Talk to RelayPay's support assistant about payments, payouts, invoices and your account.">
+<link rel="icon" href="/static/shared/relaypay-logo.png">
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<link rel="stylesheet" href="/static/shared/tokens.css">
+<link rel="stylesheet" href="/static/shared/base.css">
+<link rel="stylesheet" href="/static/voice/voice.css">
+<script type="module" src="/static/voice/main.js"></script>
+</head>
+<body>
+<div class="page">
+  <img class="logo" src="/static/shared/relaypay-logo.png" alt="RelayPay" width="162" height="30">
+
+  <main class="card" id="card" data-state="idle">
+    <header class="card-head">
+      <h1>Customer support</h1>
+      <p data-screen="details">Get help with payments, payouts, invoices and your account. Our support assistant answers straight away and can pass you to a specialist when needed.</p>
+    </header>
+
+    <!-- Screen 1: the caller's details (SPECS §3: contact details only, never proof of identity) -->
+    <div class="screen" id="details-screen" data-screen="details">
+      <form id="caller-form" class="caller-form" method="post" action="#" novalidate>
+        <div class="field">
+          <label for="name">Name</label>
+          <input id="name" name="name" type="text" autocomplete="name" maxlength="80" required
+                 aria-describedby="name-error">
+          <div class="error" id="name-error" hidden></div>
+        </div>
+        <div class="field">
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" autocomplete="email" inputmode="email" maxlength="254" required
+                 aria-describedby="email-error">
+          <div class="error" id="email-error" hidden></div>
+        </div>
+        <div class="field">
+          <label for="company">Company <span class="optional">(optional)</span></label>
+          <input id="company" name="company" type="text" autocomplete="organization" maxlength="100">
+        </div>
+        <div class="field">
+          <label for="phone">Phone <span class="optional">(optional)</span></label>
+          <input id="phone" name="phone" type="tel" autocomplete="tel" inputmode="tel" maxlength="24"
+                 placeholder="+234 803 123 4567" aria-describedby="phone-hint phone-error">
+          <div class="hint" id="phone-hint">With country code, for callbacks</div>
+          <div class="error" id="phone-error" hidden></div>
+        </div>
+        <p class="form-help">So a specialist can follow up if needed.</p>
+        <!-- disabled until main.js is ready, so an early click can never submit the form (and put details in the URL) -->
+        <button type="submit" class="btn btn-primary btn-block" id="start-call" disabled>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path></svg>
+          Start call
+        </button>
+      </form>
+
+      <section class="topics" aria-labelledby="topics-label">
+        <div class="section-label" id="topics-label">You can ask about</div>
+        <ul class="chips">
+          <li>Fees and pricing</li>
+          <li>Payout timelines</li>
+          <li>A transaction or payout by reference</li>
+          <li>Invoicing</li>
+          <li>Account and verification</li>
+        </ul>
+      </section>
+      <section class="topics topics-last" aria-labelledby="help-label">
+        <div class="section-label" id="help-label">Other ways to get help</div>
+        <p class="help-line">You can also contact support through your RelayPay dashboard.</p>
+        <p class="hours">Specialists are available Monday to Friday, 9am to 7pm Lagos time (WAT).</p>
+      </section>
+    </div>
+
+    <!-- Screen 2: the call (connecting, live, ended, error) -->
+    <div class="screen" id="call-screen" data-screen="call" hidden>
+      <div class="caller-summary">
+        <span id="caller-summary-text"></span>
+        <button type="button" class="link-button" id="edit-details" hidden>Edit</button>
+      </div>
+
+      <section class="call-area" id="call-area" aria-label="Call">
+        <div class="ring" id="ring" aria-hidden="true">
+          <span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span>
+        </div>
+        <div class="status">
+          <div class="status-label" id="status-label" role="status" aria-live="polite"></div>
+          <div class="status-sub" id="status-sub"></div>
+        </div>
+
+        <div class="controls" data-for="connecting">
+          <button type="button" class="btn btn-secondary" id="cancel-call">Cancel</button>
+        </div>
+        <div class="controls" data-for="live">
+          <button type="button" class="btn btn-secondary" id="mute" aria-pressed="false">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path></svg>
+            <span id="mute-label">Mute</span>
+          </button>
+          <button type="button" class="btn btn-danger" id="end-call">End call</button>
+        </div>
+        <div class="controls controls-error" data-for="error">
+          <p class="error-copy" id="error-copy"></p>
+          <div class="controls">
+            <button type="button" class="btn btn-primary" id="try-again">Try again</button>
+            <button type="button" class="btn btn-secondary" id="back-to-details">Back</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="ended" id="ended" data-for="ended" aria-label="Call ended">
+        <div class="ended-title">Call ended</div>
+        <div class="outcome" id="outcome" hidden>
+          <div class="outcome-head">
+            <div class="outcome-title" id="outcome-title"></div>
+            <div class="outcome-ref" id="outcome-ref" hidden>Reference <strong id="outcome-ref-value"></strong></div>
+          </div>
+          <div class="outcome-detail" id="outcome-detail"></div>
+        </div>
+        <div class="rating" id="rating">
+          <span id="rating-question">Did this help?</span>
+          <div class="rating-buttons" id="rating-buttons">
+            <button type="button" class="btn btn-secondary btn-small" data-helpful="true">Yes</button>
+            <button type="button" class="btn btn-secondary btn-small" data-helpful="false">No</button>
+          </div>
+        </div>
+        <button type="button" class="btn btn-secondary btn-block" id="new-conversation">Start a new conversation</button>
+      </section>
+
+      <section class="transcript" id="transcript" hidden aria-label="Transcript">
+        <div class="transcript-head">
+          <div class="section-label">Transcript</div>
+          <button type="button" class="link-button" id="toggle-transcript" aria-controls="transcript-lines" aria-expanded="true">Hide</button>
+        </div>
+        <div class="transcript-lines" id="transcript-lines" tabindex="0"></div>
+        <div class="visually-hidden" id="caption-announcer" aria-live="polite"></div>
+      </section>
+    </div>
+  </main>
+
+  <p class="footer">Conversations are recorded for quality and training. Never share passwords, one-time codes or full card numbers. The assistant only uses approved RelayPay support information.</p>
+</div>
+</body>
+</html>
