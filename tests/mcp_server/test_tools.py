@@ -37,6 +37,19 @@ def test_verification_checks_both_fields_and_caps_attempts():
     assert "contact_email" not in ok and "support_notes" not in ok  # details held on file never reach the model
 
 
+def test_the_tool_says_exactly_what_to_ask_given_the_form():
+    """Production voice test: the form had the email, Bex asked for it anyway, and STT heard 'LagosLedger' as 'legal'."""
+    repo = FakeRepository()
+    repo.ensure_conversation("f1", caller={"name": "Amara", "email": "amara@lagosledger.example"})
+    first = accounts.lookup_customer(repo, "f1", None, None)
+    assert first["error"] == "invalid_input" and "on the pre-call form: don't ask for it" in first["hint"]
+    assert "company name" in first["hint"]
+    miss = accounts.lookup_customer(repo, "f1", None, "legal")  # the form's email, a misheard company
+    assert miss["found"] is False and "don't ask for it" in miss["hint"] and "letter by letter" not in miss["hint"]
+    ok = accounts.lookup_customer(repo, "f1", None, "Lagos Ledger")
+    assert ok["found"] is True  # no read-back needed: the email was typed
+
+
 def test_a_restricted_account_goes_to_a_specialist_and_its_notes_never_reach_the_model():
     repo = FakeRepository()
     spoken.remember("r1", "Just to confirm, that's efua at A-C-C-R-A-S-T-A-C-K dot example. Is that right?")

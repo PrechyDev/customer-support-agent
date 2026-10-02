@@ -127,17 +127,48 @@ The owner can then invite admins and support staff from the console's Team page.
 The MCP server runs inside the backend, and it can also run alone, for example to explore the tools. In production it
 listens only on localhost inside the container, so the tools are never reachable from the internet.
 
-**Fastest, with Docker only (no Python or keys needed):**
+**Quickest, nothing to install: the demo endpoint.** A separate demo copy of the MCP server runs on Cloud Run against
+**test data only** (the brief's seed customers, transactions and payouts; never real records). Its token is shared
+with the project submission, and it opens only this demo service, never the production one.
+
+- URL: `https://<demo-service-url>/mcp`
+- Header: `Authorization: Bearer <demo-token>`
+
+```bash
+# macOS / Linux: list the 7 tools
+curl -s https://<demo-service-url>/mcp -H "Authorization: Bearer <demo-token>" \
+  -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+```powershell
+# Windows PowerShell: look up a transaction (any tool works the same way)
+$h = @{ Authorization = "Bearer <demo-token>"; Accept = "application/json, text/event-stream"; "X-Conversation-Id" = "grader-1" }
+$b = '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"lookup_transaction","arguments":{"transaction_id":"TXN-9001"}}}'
+(Invoke-RestMethod -Uri https://<demo-service-url>/mcp -Method Post -Headers $h -ContentType "application/json" -Body $b).result.content.text
+```
+
+Things to try: `search_knowledge_base` with `{"query": "transfer fees"}`; `lookup_payout` with `{"payout_id": "PAY-7002"}`;
+`lookup_customer` with `{"email": "amara@lagosledger.example", "company_name": "LagosLedger"}`, which first returns
+`confirm_email` (the read-back a caller hears); send the same call again with `"email_confirmed": true` to verify.
+Use your own `X-Conversation-Id` (any short name): verification, caps and created tickets belong to that conversation.
+A request without the token gets `401`. The MCP Inspector (`npx @modelcontextprotocol/inspector`, transport
+**Streamable HTTP**, the URL and header above) works too.
+
+**Run it yourself with Docker (no Python or keys needed):**
 
 ```bash
 docker build -t relaypay-support .
 docker run --rm -p 8001:8001 -e MCP_HOST=0.0.0.0 \
-  -e MCP_AUTH_TOKEN=grader-demo-token-0123456789abcdefghij relaypay-support relaypay-mcp
+  -e MCP_AUTH_TOKEN=replace-with-a-32-character-token relaypay-support relaypay-mcp
 # serves http://127.0.0.1:8001/mcp; check it in 10 seconds:
-curl -s http://127.0.0.1:8001/mcp -H "Authorization: Bearer grader-demo-token-0123456789abcdefghij" \
+curl -s http://127.0.0.1:8001/mcp -H "Authorization: Bearer replace-with-a-32-character-token" \
   -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
+
+On Windows PowerShell, use `Invoke-RestMethod` as in the demo example above, with `http://127.0.0.1:8001/mcp` and this
+token (PowerShell 5.1 mangles quotes passed to `curl.exe`).
 
 **With Python:**
 

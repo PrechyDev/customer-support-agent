@@ -71,7 +71,7 @@ def lookup_customer(repo: Any, cid: str, email: str | None, company_name: str | 
     company_name = company_name or conversation.get("caller_company")
     wanted_email, wanted_company = normalise_email(email), normalise_company(company_name)
     if not wanted_email or not wanted_company:
-        return error("invalid_input", "Need both a valid email and the company name. Ask for whichever is missing.")
+        return error("invalid_input", _ask_for(wanted_email, wanted_company, email_was_spoken, conversation))
     heard = heard_text(cid, spoken_email(wanted_email))  # only the spelled read-back counts (see spoken_email)
     if email_was_spoken and not confirmed(cid, "email", wanted_email, email_confirmed, heard):  # misheard: no attempt
         return {"error": "confirm_email", "say": f"Just to confirm, that's {spoken_email(wanted_email)}. Is that right?",
@@ -91,12 +91,26 @@ def lookup_customer(repo: Any, cid: str, email: str | None, company_name: str | 
         left = MAX_VERIFICATION_ATTEMPTS - attempts
         if left <= 0:  # logged here, so the record never depends on the model remembering
             repo.log_event(cid, "verification_failed", f"Email and company didn't match after {attempts} attempts")
+        retry = ("Ask them to spell the email letter by letter and confirm the company, then try once more."
+                 if email_was_spoken else
+                 "The email came from the pre-call form (typed, so not misheard): don't ask for it. Ask them to "
+                 "say or spell their company name, then try once more with company_name.")
         return {"found": False, "attempts_left": max(left, 0),
-                "hint": "Ask them to spell the email letter by letter and confirm the company, then try once more."
-                if left > 0
-                else "Don't try again: escalate as 'identity not verified'."}
+                "hint": retry if left > 0 else "Don't try again: escalate as 'identity not verified'."}
     repo.mark_verified(cid, customer["customer_id"])
     return _verified_summary(repo, cid, customer, now)
+
+
+def _ask_for(email: str | None, company: str | None, email_was_spoken: bool, conversation: dict) -> str:
+    """Exactly what's still needed. The model can't see the pre-call form, so it can't know what's already there
+    (a voice test: it asked for an email the form had)."""
+    if email and not company:
+        source = "is on the pre-call form" if not email_was_spoken else "was given"
+        return f"Their email {source}: don't ask for it. Ask only for their company name, then call again with company_name."
+    if company and not email:
+        source = "is on the pre-call form" if conversation.get("caller_company") else "was given"
+        return f"Their company {source}: don't ask for it. Ask only for their email, then call again with email."
+    return "Ask for their email and company name, then call again with both."
 
 
 def _status_result(kind: str, ref: str, record: dict, due_field: str, today: date) -> dict[str, Any]:
