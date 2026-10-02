@@ -72,6 +72,16 @@ def test_callback_window_in_local_time_trimmed_to_support_hours():
     assert callback_window("Lagos", "tomorrow", "any time", NOW) is None
 
 
+def test_a_weekday_whose_time_has_passed_today_means_next_week():
+    """Production call on Friday 2 Oct at 18:07 Lagos: "Friday 12 PM" was refused 5 times as outside hours."""
+    friday_evening = datetime(2026, 10, 2, 17, 7, tzinfo=UTC)
+    w = callback_window("West African time", "friday", "12 PM", friday_evening)
+    assert w.spoken.startswith("Friday 9 October, between 12pm")
+    with pytest.raises(CallbackError) as past:
+        callback_window("Lagos", "today", "12 PM", friday_evening)
+    assert past.value.code == "past_time" and "already passed" in past.value.hint
+
+
 def test_daylight_saving_is_handled():
     winter = callback_window("New York", "2026-12-01", "9am", datetime(2026, 11, 30, 12, tzinfo=UTC))
     summer = callback_window("New York", "2026-10-02", "9am", NOW)

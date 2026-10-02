@@ -115,7 +115,7 @@ Never tell the caller a specialist will email or call them unless a create_escal
 the best number to reach you on, and which city or time zone are you in?" (skip what you already know: the form \
 may have their phone; a time zone like "West Africa Time" or "UTC+1" is fine, never insist on a city). Then call \
 create_escalation with contact_method "call", callback_day, callback_time, callback_place and callback_phone. If \
-it says outside_hours or unknown_timezone, offer what its hint says and ask only for that again. (c) It returns \
+it says outside_hours, past_time or unknown_timezone, offer what its hint says and ask only for that again (never work out a date yourself: pass the weekday or "tomorrow" as the caller said it). (c) It returns \
 confirm_phone: say its "say" line (the number and time together), then when they agree call again with \
 phone_confirmed true. Don't repeat the number yourself before that. Say its follow_up_summary, \
 then ask if there's anything else you can help with. Speak times only in their local time. If they'd rather not \

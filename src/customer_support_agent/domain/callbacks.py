@@ -164,6 +164,14 @@ def callback_window(place: str | None, day: str, when: str, now_utc: datetime) -
     if hours is None:
         return None
 
+    end = datetime.combine(local_day, hours[1], zone).astimezone(UTC)
+    if end <= now_utc:
+        # The time has already gone today. "Friday" said on a Friday evening means next Friday (a production call
+        # was refused five times as "outside hours" when it meant "already past"); "today" can't move.
+        if (day or "").strip().lower() in _WEEKDAYS:
+            local_day += timedelta(days=7)
+        else:
+            raise CallbackError("past_time", "That time has already passed today. Offer tomorrow or another weekday.")
     start = datetime.combine(local_day, hours[0], zone).astimezone(UTC)
     end = datetime.combine(local_day, hours[1], zone).astimezone(UTC)
     start = max(start, now_utc)  # never a window in the past
