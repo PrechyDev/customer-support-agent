@@ -41,7 +41,8 @@ def test_say_labels_are_read_but_never_spoken_and_found_chunks_are_tracked():
                           *reply(labelled, pieces=12, say=False), result()]])
     events = collect(AgentSession(client, "call-1", turn_timeout_seconds=5))
     turn = events[-1]
-    assert spoken(events) == "Fees depend on the corridor. That is all."  # the tag's attributes stay silent
+    assert spoken(events).startswith("Fees depend on the corridor. That is all.")  # the tag's attributes stay silent
+    assert "sources" not in spoken(events) and "type=" not in spoken(events)
     assert (turn.answer_type, turn.sources, turn.kb_chunks) == ("answer", ("fees", "invented"), ("fees", "timelines"))
 
 
@@ -60,6 +61,16 @@ def test_a_closing_question_after_the_tags_is_kept_but_statements_are_not():
         "That payout is being reviewed. Is there anything else I can help you with?")
     client = FakeClient([[*reply("<say>Done.</say> I should now ask if they need more.", say=False), result()]])
     assert spoken(collect(AgentSession(client, "c", turn_timeout_seconds=5))) == "Done."
+
+
+def test_an_untagged_short_question_to_the_caller_is_still_spoken():
+    """An eval run: "...could you give me the transaction reference for it?" written untagged, twice."""
+    ask = "I can help with that. Could you give me the transaction reference for it?"
+    client = FakeClient([[*reply(ask, say=False), result()]])
+    assert spoken(collect(AgentSession(client, "c", turn_timeout_seconds=5))) == ask
+    thinking = "The customer wants a refund. I should ask whether they have the reference?"
+    client = FakeClient([[*reply(thinking, say=False), result()]])
+    assert spoken(collect(AgentSession(client, "c", turn_timeout_seconds=5))) == ""  # reasoning stays silent
 
 
 def test_a_reply_without_say_tags_speaks_nothing():
@@ -89,6 +100,22 @@ def test_a_call_ending_on_thanks_gets_one_goodbye_only():
     assert (turn.end_requested, turn.text) == (True, "")  # the backend's closing line says it once
     real = FakeClient([[*reply("<say>Your ticket is T-1050. Goodbye!</say><end_call/>", say=False), result()]])
     assert collect(AgentSession(real, "call-1", turn_timeout_seconds=5))[-1].text == "Your ticket is T-1050. Bye for now!"
+
+
+def test_an_answer_that_ends_on_a_statement_gets_a_closing_question():
+    """Production call: the fee answer just stopped, with no "anything else?"."""
+    fee = '<say type="answer" sources="fees">Fees depend on the corridor. You see the fee before you confirm.</say>'
+    session = AgentSession(FakeClient([[*reply(fee, say=False), result()], [*reply(fee, say=False), result()]]),
+                           "c", turn_timeout_seconds=5)
+    first = collect(session)
+    assert spoken(first) == f"Fees depend on the corridor. You see the fee before you confirm. {session_module.CLOSING_QUESTIONS[0]}"
+    assert first[-1].text.endswith(session_module.CLOSING_QUESTIONS[0])  # on record as said
+    assert spoken(collect(session)).endswith(session_module.CLOSING_QUESTIONS[1])  # rotates
+    for raw in ('<say type="answer">Your plan is Growth. Anything else?</say>',  # already asks
+                '<say type="clarify">Take your time.</say>',  # not an answer
+                '<say type="answer">You are welcome.</say><end_call/>'):  # call ending
+        said = spoken(collect(AgentSession(FakeClient([[*reply(raw, say=False), result()]]), "c", 5)))
+        assert not any(q in said for q in session_module.CLOSING_QUESTIONS)
 
 
 def test_no_second_question_when_the_reply_already_asks_one():

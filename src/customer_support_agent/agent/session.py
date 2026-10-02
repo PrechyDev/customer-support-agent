@@ -40,6 +40,8 @@ _ATTR = re.compile(r'(\w+)\s*=\s*"([^"]*)"')
 ANSWER_TYPES = ("answer", "clarify", "escalate", "decline")
 _CHUNK_ID = re.compile(r'"chunk_id"\s*:\s*"([^"]+)"')  # only the knowledge base tool returns these
 _END_CALL = "<end_call"
+CLOSING_QUESTIONS = ("Is there anything else I can help with?", "Anything else I can help you with today?",
+                     "Is there anything else you'd like to know?")
 _MAX_QUESTION_WORDS = 20
 # The word Vapi hangs up on (fallbacks.END_CALL_PHRASE / endCallPhrases). The model's own words must
 # never contain it: only the backend's fixed ending lines do.
@@ -89,6 +91,22 @@ def trailing_question(raw: str) -> str:
     if not tail.endswith("?") or "<" in tail or len(tail.split()) > _MAX_QUESTION_WORDS:
         return ""
     return tail
+
+
+_REASONING = re.compile(r"\b(?:I should|I need to (?:check|decide|call)|the (?:customer|caller|user)\b|let me think)",
+                        re.IGNORECASE)
+_MAX_UNTAGGED_WORDS = 35
+
+
+def untagged_question(raw: str) -> str:
+    """A reply written with no <say> tags at all, kept only if it's a short question to the caller (an eval run:
+    "Could you give me the transaction reference?" untagged twice, so the caller heard the technical-problem line).
+    Anything that reads like reasoning stays unspoken, as before."""
+    text = " ".join(raw.split())
+    if ("<say" in raw or "<" in text or not text.endswith("?") or len(text.split()) > _MAX_UNTAGGED_WORDS
+            or _REASONING.search(text)):
+        return ""
+    return text
 
 
 def say_labels(raw: str) -> tuple[str | None, tuple[str, ...]]:
@@ -230,6 +248,12 @@ class _Turn:
         if question:
             logger.info("Kept a closing question written after </say> (conversation=%s)", self._conversation_id)
             spoken = f"{spoken} {question}"
+        if not spoken and not self.end_requested:
+            question = untagged_question(self._raw)
+            if question:
+                logger.info("Kept an untagged reply: a short question to the caller (conversation=%s)",
+                            self._conversation_id)
+                spoken = question
         if spoken:
             answer_type, sources = say_labels(self._raw)
             self.answer_type = answer_type or self.answer_type
@@ -270,7 +294,16 @@ class AgentSession:
         self._cleanup: asyncio.Task[None] | None = None  # drain of an abandoned turn
         self._turn: _Turn | None = None  # the turn in progress (read by the Stop hook)
         self._call_tools: list[str] = []
+        self._closings = 0  # closing questions added so far (they rotate, so a long call doesn't sound scripted)
         self.broken = False  # the engine couldn't be brought back to a clean state
+
+    @staticmethod
+    def _needs_closing_question(turn: "_Turn") -> bool:
+        """An answer or a decline that ends on a statement leaves the caller in silence (a production call:
+        the fee answer just stopped). The prompt asks for "anything else?", but not reliably, so the backend
+        adds it. Never after a question, an escalation (it asks call or email), or when the call is ending."""
+        return (bool(turn.spoken) and not turn.end_requested and turn.answer_type in ("answer", "decline")
+                and not turn.spoken[-1].rstrip().endswith("?"))
 
     def spoken_this_turn(self) -> str:
         """What the caller has heard from the model in the current turn so far."""
@@ -331,6 +364,11 @@ class AgentSession:
                 if outcome == "ok":
                     logger.info("Agent turn cancelled mid-reply (conversation=%s)", self.conversation_id)
                 self._cleanup = asyncio.create_task(self._stop_and_drain(pump))
+
+        if outcome == "ok" and self._needs_closing_question(turn):
+            for event in turn._speak(CLOSING_QUESTIONS[self._closings % len(CLOSING_QUESTIONS)]):
+                yield event
+            self._closings += 1
 
         self._call_tools += [t for t in turn.tools if t not in self._call_tools]
         result = TurnResult(
