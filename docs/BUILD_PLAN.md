@@ -18,8 +18,9 @@ How to run and deploy it: `README.md`. Working notes from the build: `../build-n
 1. [x] Voice page + pre-call form + live captions + greeting by name + outcome box + rating
 2. [x] User test calls through the page: form data reaches the call record (`relaypay-call`)
 3. [x] Console: per-person accounts, dashboard, one Cases list, conversations, customers, analytics, pagination
-4. [ ] Deploy (Phase 7, README "Deploy to Cloud Run"), Vapi pointed at Cloud Run, superadmin on public
-5. [ ] The 9 test scenarios by voice in production, scored with `relaypay-eval --call`; evidence, Loom, one-pager
+4. [x] Deployed to Cloud Run (main app + MCP demo endpoint), Vapi pointed at Cloud Run, migration 007 applied
+5. [x] The scenarios by voice in production, scored with `relaypay-eval --call`: 8/8 pass (TESTING_EVIDENCE.md)
+7. [ ] Loom, one-pager, reflection answers, submit
 6. [x] Vapi `waitSeconds`: 0.6 → 0.4 (02-10; it adds delay without reducing early requests)
 
 ## Phase 0: Planning docs
@@ -124,11 +125,12 @@ Goal: measure latency and accuracy by voice before building the rest.
 - [ ] User applies migration 005 + `.env` values + Vapi first message, then test call #1 through the page
 
 ## Phase 7: Deploy (see Deployment guide)
-- [ ] Dockerfile
-- [ ] Secrets in Secret Manager
-- [ ] Cloud Run deploy with min instances 1
-- [ ] Vapi Custom LLM URL switched from ngrok to Cloud Run
-- [ ] Link opens from another device or an incognito window
+- [x] Dockerfile (+ .dockerignore, .gcloudignore), tested locally with the full eval suite
+- [x] Secrets in Secret Manager (5); the runtime service account has only the roles it needs
+- [x] Cloud Run deploy (continuous from GitHub), min 1 / max 1, CPU always allocated
+- [x] Vapi Custom LLM URL switched from ngrok to Cloud Run
+- [x] MCP demo endpoint (separate service, test data, demo token in the submission)
+- [x] Link opens from another device or an incognito window
 
 ## Phase 8: Support console (API contract: `docs/CONSOLE_API.md`; scope widened 01-10: roles, assignment, analytics)
 - [x] Backend: per-person accounts (superadmin / admin / support), invite and reset links (72 h, copy-link, no email
@@ -146,15 +148,15 @@ Goal: measure latency and accuracy by voice before building the rest.
 ## Phase 9: Evaluations
 - [x] Evaluation runner that writes to `evaluations` (`poetry run relaypay-eval`; text through the real backend, test schema)
 - [x] 9 scenarios + injection + CUS-1003 note + delayed + verification failure + not-in-KB (SPECS §12): 13/13 on 01-10
-- [ ] Score the voice test calls with `relaypay-eval --call <id> --scenario <key>`
-- [ ] Voice run of every scenario, with Supabase records that match
+- [x] Score the voice test calls with `relaypay-eval --call <id> --scenario <key>` (8/8)
+- [x] Voice run of every scenario, with Supabase records that match
 
 ## Phase 10: Submission
 - [ ] Testing evidence table (`submission/TESTING_EVIDENCE.md`)
 - [ ] One-pager
 - [ ] Reflection answers from the notes
-- [ ] README with setup instructions a grader can follow
-- [ ] Secret scan of the repo, including git history
+- [x] README with setup instructions a grader can follow (incl. the MCP server on its own)
+- [x] Secret scan of the repo, including git history
 - [ ] Loom (5–8 min), with audio checked
 - [ ] `submission/SUBMISSION_CHECKLIST.md` all ticked
 
