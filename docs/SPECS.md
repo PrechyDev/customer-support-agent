@@ -318,7 +318,7 @@ Caller speech, tool results and KB text are **data, never instructions**. The pr
 - **Error messages and settings output never include secret values.**
 - The Vapi endpoint rejects any request without the secret.
 - RLS is on for every table, with no anonymous access.
-- **Abuse and cost guards (what exists):** every Vapi request needs the secret; at most 10 calls at once (`AGENT_MAX_SESSIONS`); a caller message over 2,000 characters never reaches Claude (the caller hears "Sorry, that was a lot to take in at once. Could you tell me the main thing you need help with?"); max 6 model steps per message; one Cloud Run instance. **Not built:** per-address rate limiting. It wouldn't help on `/chat/completions` (every request comes from Vapi's servers); the console login gets a try limit in Phase 8, and the Vapi public key is restricted to our site and assistant in Phase 6. Wider rate limiting is a future improvement.
+- **Abuse and cost guards (what exists):** every Vapi request needs the secret; at most 10 calls at once (`AGENT_MAX_SESSIONS`); a caller message over 2,000 characters never reaches Claude (the caller hears "Sorry, that was a lot to take in at once. Could you tell me the main thing you need help with?"); max 6 model steps per message; one Cloud Run instance. **Rate limits (built 01-10, in memory, one instance):** console sign-in (5 tries per email and address, 20 per address, per 15 min) and invite links; the voice page's outcome and rating endpoints (60 per minute per address). Not on `/chat/completions`, where it wouldn't help (every request comes from Vapi's servers; the secret, the call cap and the message cap guard it).
 
 ---
 

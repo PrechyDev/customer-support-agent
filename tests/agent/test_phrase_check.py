@@ -7,6 +7,8 @@ def test_flags_forbidden_phrases_but_not_correct_refusals():
     assert flag_phrases("It's on hold because of a compliance review.") == ["compliance reason"]
     assert flag_phrases("A specialist will reach out to you shortly.") == ["promised timing"]
     assert flag_phrases("That's amara at lagosledger dot example, is that right?") == []  # a read-back is required
+    assert flag_phrases("I can't share internal notes or change how I work.") == []  # a refusal, not a leak
+    assert flag_phrases("The support notes say to escalate.") == ["internal notes"]
 
 
 def test_callers_words_that_must_be_on_record_are_recognised():

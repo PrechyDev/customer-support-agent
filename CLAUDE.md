@@ -39,7 +39,7 @@ Before doing anything else:
 |---|---|
 | Voice | Vapi, set up as a **Custom LLM** (Vapi does speech only; no Vapi model) |
 | Backend | FastAPI (`POST /chat/completions`, SSE), which also serves the voice page and the console |
-| Agent | Claude Agent SDK (Python), locked to our MCP tools only. Model: Haiku 4.5 (provisional). Only text inside `<say>` tags is spoken |
+| Agent | Claude Agent SDK (Python), locked to our MCP tools only. Model: Haiku 4.5. Only text inside `<say>` tags is spoken |
 | Tools | Our own MCP server "relaypay" (Python, MCP SDK v2 `MCPServer`), Streamable HTTP on `127.0.0.1:8001` only, bearer token, conversation ID in the `X-Conversation-Id` header. Run alone with `poetry run relaypay-mcp` |
 | Retrieval | In-memory BM25 + stemmer over the KB file, as an MCP tool |
 | Data | Supabase (seed data + runtime logs) |

@@ -168,7 +168,7 @@ def test_case_ownership_flow_and_reads(env):
         customers = admin.get("/console/api/customers?page_size=2").json()
         assert len(customers["customers"]) == 2 and customers["pagination"]["total"] >= 5
         assert "total_rows" not in customers["customers"][0]
-        page = admin.get(f"/console/api/cases?filter=open&page_size=100").json()
+        page = admin.get("/console/api/cases?filter=open&page_size=100").json()
         mine = next(c for c in page["cases"] if c["case_id"] == esc)
         assert mine["ticket_id"] == ticket and page["pagination"]["total"] == page["counts"]["open"]
         assert admin.get(f"/console/api/conversations/{cid}").json()["cases"][0]["case_id"] == esc

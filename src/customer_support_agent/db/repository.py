@@ -111,9 +111,6 @@ class Repository:
     def payout(self, payout_id: str) -> dict | None:
         return self._run("select * from payouts where payout_id = %s", (payout_id,), "one")
 
-    def payout_for_transaction(self, transaction_id: str) -> dict | None:
-        return self._run("select * from payouts where transaction_id = %s", (transaction_id,), "one")
-
     _LOOKUPS = {"transaction": ("transactions", "transaction_id"), "payout": ("payouts", "payout_id"),
                 "payout_by_transaction": ("payouts", "transaction_id")}
 

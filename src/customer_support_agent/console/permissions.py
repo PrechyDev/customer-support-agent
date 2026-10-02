@@ -4,7 +4,6 @@ superadmin (the owner) > admin > support. Admins manage support staff only; only
 nobody can change or disable the superadmin.
 """
 
-ROLES = ("superadmin", "admin", "support")
 INVITABLE = {"superadmin": ("admin", "support"), "admin": ("support",), "support": ()}
 
 

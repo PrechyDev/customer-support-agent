@@ -1,7 +1,7 @@
 """Run the MCP server on its own: `poetry run relaypay-mcp` (or `python -m customer_support_agent.mcp_server`).
 
-The backend will later start this same app inside its own process. Running it
-standalone is for local testing, the MCP Inspector, and graders.
+The backend starts this same app inside its own process (localhost only). Running it standalone is for local
+testing, the MCP Inspector, and graders: without DATABASE_URL only search_knowledge_base works (README).
 """
 
 import logging

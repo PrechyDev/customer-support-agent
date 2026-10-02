@@ -17,7 +17,8 @@ _RULES = (
                                    r"|\b(?:shortly|right away|straight away|immediately)\b"
                                    r"|\bwithin\s+(?:\w+\s+)?(?:minutes?|hours?|days?)\b", re.IGNORECASE), True),
     ("compliance reason", re.compile(r"\bcompliance review\b", re.IGNORECASE), False),
-    ("internal notes", re.compile(r"\b(?:support|internal|account)\s+notes?\b", re.IGNORECASE), False),
+    # "I can't share internal notes" is the right refusal (an eval run flagged it), so a negated mention is skipped
+    ("internal notes", re.compile(r"\b(?:support|internal|account)\s+notes?\b", re.IGNORECASE), True),
     ("risk logic", re.compile(r"\brisk (?:score|rules?|logic|flags?)\b", re.IGNORECASE), False),
 )
 # No "email read aloud" rule: tools never give the model a stored email, so the only emails it can say are

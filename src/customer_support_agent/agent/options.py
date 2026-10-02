@@ -12,7 +12,6 @@ MCP_SERVER = "relaypay"
 TOOL_NAMES = ("search_knowledge_base", "lookup_customer", "lookup_transaction", "lookup_payout",
               "create_support_ticket", "create_escalation", "log_conversation_event")
 ALLOWED_TOOLS = [f"mcp__{MCP_SERVER}__{name}" for name in TOOL_NAMES]
-KB_TOOL = ALLOWED_TOOLS[0]
 
 
 def build_options(settings: AgentSettings, system_prompt: str, conversation_id: str, workdir: Path,

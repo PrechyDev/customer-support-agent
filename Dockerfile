@@ -27,7 +27,8 @@ ENV PATH="/app/.venv/bin:$PATH" \
     HOME=/home/relaypay \
     HOST=0.0.0.0 \
     PORT=8080 \
-    LOG_FORMAT=json
+    LOG_FORMAT=json \
+    RETRIEVAL_LOG_PATH=/tmp/retrieval.jsonl
 
 EXPOSE 8080
 CMD ["relaypay-backend"]
