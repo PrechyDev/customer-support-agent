@@ -197,6 +197,7 @@ SCENARIOS: tuple[Scenario, ...] = (
               Line("D-A-N-I-E-L at N-A-I-R-O-B-I-O-P-S dot example. And sorry, the company is KenyaOps Limited.",
                    when=r"company|again|match|find|spell|check|email"),
               Line("Yes, that's right.", when=CONFIRMING),
+              Line("K-E-N-Y-A-O-P-S, KenyaOps Limited.", when=r"spell|letter"),
               Line("D-A-N-I-E-L at N-A-I-R-O-B-I-O-P-S dot example. Maybe it's under KenyaOps Group?",
                    when=r"company|again|match|find|spell|check|email"),
               Line("Yes, that's right.", when=CONFIRMING),

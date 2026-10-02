@@ -50,6 +50,22 @@ def test_the_tool_says_exactly_what_to_ask_given_the_form():
     assert ok["found"] is True  # no read-back needed: the email was typed
 
 
+def test_a_misheard_brand_name_or_form_email_still_verifies_but_a_wrong_one_does_not():
+    """Two production calls as Efua: STT heard "AccraStack" as Acrostic/Case/Akrastack, and her own form email,
+    read aloud, as a4@akrastack.example. Both locked her out."""
+    def efua(cid):
+        repo = FakeRepository()
+        repo.ensure_conversation(cid, caller={"name": "Efua", "email": "efua@accrastack.example"})
+        return repo
+    misheard = efua("m1")
+    assert accounts.lookup_customer(misheard, "m1", None, "Akrastack")["found"] is True  # close to AccraStack
+    form_read_aloud = efua("m2")  # the spoken email is the form's, misheard: the typed one is used, no read-back
+    assert accounts.lookup_customer(form_read_aloud, "m2", "a4 at akrastack dot example", "Accra Stack")["found"] is True
+    wrong = efua("m3")
+    assert accounts.lookup_customer(wrong, "m3", None, "Acrostic")["found"] is False  # too far: not a match
+    assert accounts.lookup_customer(wrong, "m3", None, "LagosLedger")["found"] is False  # another company
+
+
 def test_a_restricted_account_goes_to_a_specialist_and_its_notes_never_reach_the_model():
     repo = FakeRepository()
     spoken.remember("r1", "Just to confirm, that's efua at A-C-C-R-A-S-T-A-C-K dot example. Is that right?")

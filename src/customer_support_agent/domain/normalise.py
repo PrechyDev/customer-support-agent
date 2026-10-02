@@ -4,6 +4,7 @@ Spoken input is messy: "amara at lagos ledger dot example", "T X N nine zero zer
 """
 
 import re
+from difflib import SequenceMatcher
 
 _DIGIT_WORDS = {
     "zero": "0", "oh": "0", "o": "0", "one": "1", "two": "2", "three": "3", "four": "4",
@@ -43,6 +44,21 @@ def spoken_email(email: str) -> str:
         return email.replace("@", " at ").replace(".", " dot ")
     spelled = ["-".join("dash" if c == "-" else c.upper() for c in label) for label in labels[:-1]]
     return f"{user.replace('.', ' dot ')} at {' dot '.join([*spelled, labels[-1]])}"
+
+
+SAME_NAME = 0.8  # measured on real mishearings: "Akrastack" 0.84, "CCRSTACK" 0.89 vs AccraStack; "Acrostic" 0.67
+
+
+def similarity(a: str, b: str) -> float:
+    """0..1, how much of two strings is the same letters in the same order."""
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def companies_match(said: str | None, on_file: str | None) -> bool:
+    """The company check tolerates speech-to-text mishearing a brand name ("Akrastack" for AccraStack). The
+    company is a public business name, not a secret: the email stays the exact factor."""
+    a, b = normalise_company(said), normalise_company(on_file)
+    return bool(a and b) and (a == b or (min(len(a), len(b)) >= 4 and similarity(a, b) >= SAME_NAME))
 
 
 def normalise_company(raw: str | None) -> str:

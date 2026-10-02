@@ -6,7 +6,7 @@ through a dedicated **MCP server**, opens tickets and escalations when a person 
 Postgres (Supabase). Support staff pick up the work in a web **support console**.
 
 - **Voice page (live):** https://relaypay-support-803943652745.europe-west1.run.app/
-- **Support console (live):** https://relaypay-support-803943652745.europe-west1.run.app/console
+- **Support console (live):** https://relaypay-support-803943652745.europe-west1.run.app/console (you can reach out for test credentials)
 - **MCP demo endpoint (live, test data):** https://relaypay-mcp-demo-1-803943652745.europe-west1.run.app/mcp (see *Using the MCP server on its own*)
 
 ## Features

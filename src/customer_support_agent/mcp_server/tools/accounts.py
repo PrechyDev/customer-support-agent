@@ -5,10 +5,19 @@ what the caller may hear: no amounts, no other customers, no failure reasons.
 """
 
 import hashlib
+import logging
 from datetime import date, datetime
 from typing import Any
 
-from customer_support_agent.domain.normalise import normalise_company, normalise_email, parse_reference, spoken_email
+from customer_support_agent.domain.normalise import (
+    SAME_NAME,
+    companies_match,
+    normalise_company,
+    normalise_email,
+    parse_reference,
+    similarity,
+    spoken_email,
+)
 from customer_support_agent.domain.status import caller_status
 from customer_support_agent.agent.spoken import heard_text
 from customer_support_agent.mcp_server.tools import cases
@@ -18,6 +27,8 @@ from customer_support_agent.mcp_server.tools.common import (
     confirmed,
     error,
 )
+
+logger = logging.getLogger(__name__)
 
 LOOKUP_CUSTOMER = (
     "Verify the caller and get their account summary. Needs BOTH the email and the company name. Leave out "
@@ -67,7 +78,14 @@ def lookup_customer(repo: Any, cid: str, email: str | None, company_name: str | 
         return error("limit_reached", "Too many attempts. Don't try again: escalate as 'identity not verified'.")
 
     email_was_spoken = bool(email)  # the form's email was typed; a spoken one may be misheard
-    email = email or conversation.get("caller_email")  # what was said wins; otherwise the pre-call form
+    form_email = conversation.get("caller_email")
+    said = normalise_email(email) if email else None
+    if said and form_email and said != form_email and similarity(said, form_email) >= SAME_NAME:
+        # The caller reading out their own form email, misheard ("a4@akrastack.example" for
+        # efua@accrastack.example, a voice test): use what they typed. A clearly different email still wins.
+        logger.info("Spoken email is the pre-call form's, misheard: using the form's (conversation=%s)", cid)
+        email, email_was_spoken = form_email, False
+    email = email or form_email  # what was said wins; otherwise the pre-call form
     company_name = company_name or conversation.get("caller_company")
     wanted_email, wanted_company = normalise_email(email), normalise_company(company_name)
     if not wanted_email or not wanted_company:
@@ -87,7 +105,7 @@ def lookup_customer(repo: Any, cid: str, email: str | None, company_name: str | 
 
     attempts = repo.record_verification_attempt(cid, fingerprint)
     customer = repo.customer_by_email(wanted_email)
-    if not customer or normalise_company(customer["company_name"]) != wanted_company:
+    if not customer or not companies_match(company_name, customer["company_name"]):
         left = MAX_VERIFICATION_ATTEMPTS - attempts
         if left <= 0:  # logged here, so the record never depends on the model remembering
             repo.log_event(cid, "verification_failed", f"Email and company didn't match after {attempts} attempts")
