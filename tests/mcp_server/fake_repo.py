@@ -65,8 +65,8 @@ class FakeRepository:
     def mark_verified(self, cid, customer_id):
         self.conversations[cid]["verified_customer_id"] = customer_id
 
-    def close_conversation(self, cid, summary):
-        self.closed.append((cid, summary))
+    def close_conversation(self, cid, summary, ended_reason=None, caller_left=False):
+        self.closed.append((cid, summary) if not (ended_reason or caller_left) else (cid, summary, ended_reason, caller_left))
 
     def mark_abandoned(self, cid):
         self.closed.append((cid, "abandoned"))

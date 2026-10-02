@@ -88,6 +88,7 @@ def create_app(manager: Manager, vapi_secret: str,
     app = FastAPI(title="RelayPay support backend", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     auth_format_logged = False
     last_sent: dict[str, str] = {}  # call ID -> what we sent last turn (for "what the caller actually heard")
+    final_words: dict[str, str] = {}  # call ID -> Bex's last words, kept between Vapi's two end events
     flagged: dict[str, set[str]] = {}  # call ID -> event types already logged from the caller's words
     callers: dict[str, dict | None] = {}  # call ID -> pre-call form, from the first request or event that has it
 
@@ -215,15 +216,21 @@ def create_app(manager: Manager, vapi_secret: str,
             caller = caller_for(str(call_id), message)
             run_in_background(manager.prewarm(str(call_id), caller))  # answer Vapi at once; the engine starts meanwhile
         elif call_id and (kind == "end-of-call-report" or (kind == "status-update" and message.get("status") == "ended")):
-            logger.info("Call ended (conversation=%s event=%s reason=%s)", call_id, kind,
-                        message.get("endedReason") or (message.get("call") or {}).get("endedReason") or "not given")
-            last_sent.pop(str(call_id), None)
+            reason = message.get("endedReason") or (message.get("call") or {}).get("endedReason")
+            logger.info("Call ended (conversation=%s event=%s reason=%s)", call_id, kind, reason or "not given")
+            # Bex's last words decide whether the caller left mid-conversation. Vapi sends two end events and the
+            # reason may come only with the second, so they're kept until the end-of-call report.
+            last = last_sent.pop(str(call_id), None)
+            if last is not None:
+                final_words[str(call_id)] = last
+            last = final_words.pop(str(call_id), None) if kind == "end-of-call-report" else final_words.get(str(call_id))
+            caller_left = reason == "customer-ended-call" and last is not None and not _finished(last)
             forget_spoken(str(call_id))
             callers.pop(str(call_id), None)
             flagged.pop(str(call_id), None)
             analysis = message.get("analysis") if isinstance(message.get("analysis"), dict) else {}
             summary = analysis.get("summary") if isinstance(analysis.get("summary"), str) else None
-            recorder.ended(str(call_id), summary)  # Vapi's end-of-call summary (analysisPlan.summaryPlan)
+            recorder.ended(str(call_id), summary, reason, caller_left)  # summary: Vapi's analysisPlan.summaryPlan
             run_in_background(manager.close(str(call_id)))
         logger.debug("Vapi event: type=%s status=%s call=%s", kind, message.get("status"), call_id)
         return {"ok": True}
@@ -309,6 +316,13 @@ async def _fixed_line(line: str, delay: float = 0.0) -> AsyncIterator[AgentEvent
         await asyncio.sleep(delay)
     yield TextDelta(line)
     yield TurnResult(outcome="ok", fallback=line)
+
+
+def _finished(last_words: str) -> bool:
+    """Bex had wrapped up: the closing line, or "anything else?". Hanging up then is a normal end of a call;
+    hanging up while she was mid-conversation (asking for an email, say) means the caller left."""
+    text = last_words.lower()
+    return fallbacks.END_CALL_PHRASE.lower() in text or "anything else" in text
 
 
 def _ms_since(started: float) -> float:

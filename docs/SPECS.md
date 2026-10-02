@@ -391,7 +391,7 @@ Based on `mcp-tool-requirements.md`. Deviations from the spec are marked **Δ**.
 | Caller is done ("no, that's all", "bye") | The model writes `<end_call/>`; the **backend** says the closing line from §2b, ending with "Goodbye.", and Vapi hangs up. |
 | A reply is slow | The **backend** (not the model) follows the waiting ladder in §2b: a varied filler at 2 s, a reassurance at 8 s, a timeout at 15 s. Fast replies never hear it. The model is told never to narrate ("let me search…"), because the search itself takes about 0.2 ms, so a narrated filler was always followed by an instant answer. |
 | Logging fails | Never blocks or breaks the reply. Logs are written after the response, with errors caught. |
-| Call drops | The conversation is closed when Vapi's end-of-call report arrives, and marked `abandoned` if it never does. |
+| Call drops | The conversation is closed when Vapi's end-of-call report arrives, and marked `abandoned` if it never does. Vapi's `endedReason` is saved (`conversations.ended_reason`, migration 007). **Changed 02-10:** a caller who ends the call (`customer-ended-call`) while Bex is mid-conversation (her last words weren't the closing line or "anything else?") is also `abandoned`, shown as "Caller hung up"; hanging up after "anything else?" is a normal end. An escalation still takes precedence. |
 | Unknown status or bad data | Escalate, never guess. |
 
 ---

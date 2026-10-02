@@ -163,6 +163,28 @@ def test_secret_check_accepts_bearer_or_raw_value():
     assert describe_auth_header("abcd") == "no Bearer prefix, 4 chars"
 
 
+def test_a_caller_who_hangs_up_mid_conversation_is_recorded_as_having_left():
+    """A production call counted as "answered" though the caller hung up while Bex asked for an email."""
+    auth = {"X-RelayPay-Secret": SECRET}
+
+    def call(reply: str) -> tuple:
+        class Asks(FakeManager):
+            async def ask(self, call_id, message, caller=None):
+                yield TextDelta(reply)
+                yield TurnResult(outcome="ok", text=reply, answer_type="clarify")
+        repo = FakeRepository()
+        with TestClient(create_app(Asks(), vapi_secret=SECRET, recorder=CallRecorder(repo))) as c:
+            c.post("/chat/completions", json=BODY, headers=auth)
+            c.post("/vapi/events", json={"message": {"type": "status-update", "status": "ended",  # no reason yet
+                                                     "call": {"id": "call-1"}}}, headers=auth)
+            c.post("/vapi/events", json={"message": {"type": "end-of-call-report", "call": {"id": "call-1"},
+                                                     "endedReason": "customer-ended-call"}}, headers=auth)
+        return repo.closed[-1]
+
+    assert call("Could you give me your email address?") == ("call-1", None, "customer-ended-call", True)
+    assert call("Fees depend on the corridor. Anything else I can help you with today?")[3] is False  # a normal end
+
+
 def test_call_is_recorded_with_the_form_each_turn_its_grounding_and_vapis_summary():
     repo = FakeRepository()
     manager = FakeManager()

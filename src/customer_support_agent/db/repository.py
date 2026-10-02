@@ -85,13 +85,17 @@ class Repository:
         self._run("update conversations set verified_customer_id = %s, caller_identifier = %s where conversation_id = %s",
                   (customer_id, customer_id, cid))
 
-    def close_conversation(self, cid: str, summary: str | None) -> None:
-        """Ends the record: escalated if any escalation exists, otherwise ended. Safe to call twice."""
+    def close_conversation(self, cid: str, summary: str | None, ended_reason: str | None = None,
+                           caller_left: bool = False) -> None:
+        """Ends the record: escalated if any escalation exists; abandoned if the caller hung up mid-conversation
+        (once marked, a later end event keeps it); otherwise ended. Safe to call twice."""
         self._run(
             "update conversations set ended_at = coalesce(ended_at, now()), summary = coalesce(%s, summary), "
+            "ended_reason = coalesce(%s, ended_reason), "
             "final_status = case when exists (select 1 from escalations e where e.conversation_id = %s) "
-            "then 'escalated' else 'ended' end where conversation_id = %s",
-            (summary, cid, cid),
+            "then 'escalated' when %s or final_status = 'abandoned' then 'abandoned' else 'ended' end "
+            "where conversation_id = %s",
+            (summary, ended_reason, cid, caller_left, cid),
         )
 
     def mark_abandoned(self, cid: str) -> None:

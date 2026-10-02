@@ -39,8 +39,8 @@ class CallRecorder:
     def event(self, cid: str, event_type: str, summary: str) -> None:
         self._background(cid, "event", lambda: self._repo.log_event(cid, event_type, summary, {"source": "backend"}))
 
-    def ended(self, cid: str, summary: str | None) -> None:
-        self._background(cid, "end", lambda: self._repo.close_conversation(cid, summary))
+    def ended(self, cid: str, summary: str | None, ended_reason: str | None = None, caller_left: bool = False) -> None:
+        self._background(cid, "end", lambda: self._repo.close_conversation(cid, summary, ended_reason, caller_left))
 
     def abandoned(self, cid: str) -> None:
         self._background(cid, "abandon", lambda: self._repo.mark_abandoned(cid))
