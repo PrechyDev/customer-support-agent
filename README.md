@@ -5,8 +5,9 @@ A voice customer support agent for RelayPay, a B2B cross-border payments company
 through a dedicated **MCP server**, opens tickets and escalations when a person is needed, and records every step in
 Postgres (Supabase). Support staff pick up the work in a web **support console**.
 
-- **Voice page:** `https://<your-deployment>/`
-- **Support console:** `https://<your-deployment>/console`
+- **Voice page (live):** https://relaypay-support-803943652745.europe-west1.run.app/
+- **Support console (live):** https://relaypay-support-803943652745.europe-west1.run.app/console
+- **MCP demo endpoint (live, test data):** https://relaypay-mcp-demo-1-803943652745.europe-west1.run.app/mcp (see *Using the MCP server on its own*)
 
 ## Features
 
@@ -131,12 +132,12 @@ listens only on localhost inside the container, so the tools are never reachable
 **test data only** (the brief's seed customers, transactions and payouts; never real records). Its token is shared
 with the project submission, and it opens only this demo service, never the production one.
 
-- URL: `https://<demo-service-url>/mcp`
+- URL: `https://relaypay-mcp-demo-1-803943652745.europe-west1.run.app/mcp`
 - Header: `Authorization: Bearer <demo-token>`
 
 ```bash
 # macOS / Linux: list the 7 tools
-curl -s https://<demo-service-url>/mcp -H "Authorization: Bearer <demo-token>" \
+curl -s https://relaypay-mcp-demo-1-803943652745.europe-west1.run.app/mcp -H "Authorization: Bearer <demo-token>" \
   -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
@@ -145,7 +146,7 @@ curl -s https://<demo-service-url>/mcp -H "Authorization: Bearer <demo-token>" \
 # Windows PowerShell: look up a transaction (any tool works the same way)
 $h = @{ Authorization = "Bearer <demo-token>"; Accept = "application/json, text/event-stream"; "X-Conversation-Id" = "grader-1" }
 $b = '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"lookup_transaction","arguments":{"transaction_id":"TXN-9001"}}}'
-(Invoke-RestMethod -Uri https://<demo-service-url>/mcp -Method Post -Headers $h -ContentType "application/json" -Body $b).result.content.text
+(Invoke-RestMethod -Uri https://relaypay-mcp-demo-1-803943652745.europe-west1.run.app/mcp -Method Post -Headers $h -ContentType "application/json" -Body $b).result.content.text
 ```
 
 Things to try: `search_knowledge_base` with `{"query": "transfer fees"}`; `lookup_payout` with `{"payout_id": "PAY-7002"}`;
